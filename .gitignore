@@ -1,0 +1,31 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+.venv/
+
+# Python build and test artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime state
+logs/
+tmp/
+data/*.sqlite3
+data/pmaa_skill_state.json
+
+# Local / imported skill source repositories can be large and independently versioned
+skills/*/_repo/
+skills/**/node_modules/
+skills/**/target/
+skills/**/.venv/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

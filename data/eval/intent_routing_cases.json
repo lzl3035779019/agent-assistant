@@ -1,0 +1,323 @@
+[
+  {
+    "case_id": "casual-001",
+    "category": "casual_chat",
+    "user_input": "hi",
+    "expected": {
+      "intent": "casual_chat",
+      "task_kind": "casual_chat",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "英文短问候应直接回答，不需要工具。"
+  },
+  {
+    "case_id": "casual-002",
+    "category": "casual_chat",
+    "user_input": "你好",
+    "expected": {
+      "intent": "casual_chat",
+      "task_kind": "casual_chat",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "casual_chat",
+      "task_kind": "casual_chat",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "中文短问候应由模型路由为直接回答。"
+  },
+  {
+    "case_id": "self-001",
+    "category": "self_status",
+    "user_input": "what model are you",
+    "expected": {
+      "intent": "model_identity",
+      "task_kind": "self_status",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "模型身份问题应直接读取系统配置。"
+  },
+  {
+    "case_id": "self-002",
+    "category": "self_status",
+    "user_input": "你是什么模型",
+    "expected": {
+      "intent": "model_identity",
+      "task_kind": "self_status",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "model_identity",
+      "task_kind": "self_status",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "中文模型身份问题不应触发搜索。"
+  },
+  {
+    "case_id": "memory-001",
+    "category": "memory_update",
+    "user_input": "我叫小林，写到记忆里",
+    "expected": {
+      "intent": "memory_update",
+      "task_kind": "memory_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "memory_update",
+      "task_kind": "memory_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "用户显式要求写入长期记忆，不应搜索。"
+  },
+  {
+    "case_id": "memory-002",
+    "category": "memory_update",
+    "user_input": "以后回答尽量简洁一点，记住",
+    "expected": {
+      "intent": "memory_update",
+      "task_kind": "memory_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "memory_update",
+      "task_kind": "memory_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "稳定偏好应进入记忆链路。"
+  },
+  {
+    "case_id": "realtime-001",
+    "category": "realtime_query",
+    "user_input": "今天北京天气怎么样",
+    "expected": {
+      "intent": "weather_query",
+      "task_kind": "realtime_query",
+      "execution_mode": "tool_call",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "weather_query",
+      "task_kind": "realtime_query",
+      "execution_mode": "tool_call",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": false
+    },
+    "rationale": "天气是实时信息，当前 MVP 无 weather 专用工具，应归一到 search。"
+  },
+  {
+    "case_id": "realtime-002",
+    "category": "realtime_query",
+    "user_input": "台风巴威到哪里了，怎么样了",
+    "expected": {
+      "intent": "typhoon_status_query",
+      "task_kind": "realtime_query",
+      "execution_mode": "tool_call",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "typhoon_status_query",
+      "task_kind": "realtime_query",
+      "execution_mode": "tool_call",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": false
+    },
+    "rationale": "台风位置和状态属于实时外部信息。"
+  },
+  {
+    "case_id": "search-001",
+    "category": "search_task",
+    "user_input": "查一下 DeepSeek 最新模型信息",
+    "expected": {
+      "intent": "search_query",
+      "task_kind": "search_task",
+      "execution_mode": "tool_call",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "search_query",
+      "task_kind": "search_task",
+      "execution_mode": "tool_call",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": false
+    },
+    "rationale": "明确查询最新信息，应直接工具调用。"
+  },
+  {
+    "case_id": "research-001",
+    "category": "research_task",
+    "user_input": "帮我研究 LangGraph 的核心概念，并生成学习路线",
+    "expected": {
+      "intent": "research_report",
+      "task_kind": "research_task",
+      "execution_mode": "plan_and_execute",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": true
+    },
+    "llm_decision": {
+      "intent": "research_report",
+      "task_kind": "research_task",
+      "execution_mode": "plan_and_execute",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": true
+    },
+    "rationale": "研究报告需要检索、组织和写作，应该走规划链路。"
+  },
+  {
+    "case_id": "writing-001",
+    "category": "writing_task",
+    "user_input": "帮我写一段 PMAA 项目介绍",
+    "expected": {
+      "intent": "writing_request",
+      "task_kind": "writing_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "writing_request",
+      "task_kind": "writing_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "简单写作不一定需要搜索和规划。"
+  },
+  {
+    "case_id": "writing-002",
+    "category": "writing_task",
+    "user_input": "总结这段话：LangGraph 可以构建有状态的多步骤 Agent 工作流。",
+    "expected": {
+      "intent": "summarization",
+      "task_kind": "writing_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "llm_decision": {
+      "intent": "summarization",
+      "task_kind": "writing_task",
+      "execution_mode": "direct_answer",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "给定内容总结不需要外部资料。"
+  },
+  {
+    "case_id": "planning-001",
+    "category": "planning_task",
+    "user_input": "帮我制定下周学习 LangGraph 的计划",
+    "expected": {
+      "intent": "learning_plan",
+      "task_kind": "planning_task",
+      "execution_mode": "plan_and_execute",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": true
+    },
+    "llm_decision": {
+      "intent": "learning_plan",
+      "task_kind": "planning_task",
+      "execution_mode": "plan_and_execute",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": true
+    },
+    "rationale": "学习计划可结合外部资料并拆解步骤，进入规划链路。"
+  },
+  {
+    "case_id": "coding-001",
+    "category": "coding_task",
+    "user_input": "帮我实现一个 Python 函数，把 Markdown 标题提取出来",
+    "expected": {
+      "intent": "coding_request",
+      "task_kind": "coding_task",
+      "execution_mode": "plan_and_execute",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": true
+    },
+    "llm_decision": {
+      "intent": "coding_request",
+      "task_kind": "coding_task",
+      "execution_mode": "plan_and_execute",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": true
+    },
+    "rationale": "当前 MVP 没有 Coding Agent，先按复杂任务进入工作流。"
+  },
+  {
+    "case_id": "clarify-001",
+    "category": "clarification",
+    "user_input": "这个呢",
+    "expected": {
+      "intent": "ambiguous",
+      "task_kind": "unknown",
+      "execution_mode": "clarification",
+      "need_tools": false,
+      "required_tool": "none",
+      "should_plan": false
+    },
+    "rationale": "没有上下文的短指代问题应要求用户补充。"
+  },
+  {
+    "case_id": "followup-001",
+    "category": "follow_up",
+    "user_input": "它和 LangChain 有什么区别",
+    "conversation_context": "用户刚才正在研究 LangGraph 的核心概念。",
+    "expected": {
+      "intent": "follow_up",
+      "task_kind": "contextual_task",
+      "execution_mode": "plan_and_execute",
+      "need_tools": true,
+      "required_tool": "search",
+      "should_plan": true
+    },
+    "rationale": "有明确历史上下文的追问应进入上下文任务工作流。"
+  }
+]

@@ -16,8 +16,11 @@ class WorkflowGraphState(TypedDict, total=False):
     intent: str
     task_kind: str
     execution_mode: str
+    need_memory: bool
     required_tool: str
     should_plan: bool
+    requires_confirmation: bool
+    risk_level: str
     route_confidence: float
     direct_answer: str
     plan: ExecutionPlan

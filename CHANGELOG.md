@@ -2,6 +2,15 @@
 
 本项目按日期记录重要功能、修复、架构调整和版本标签。每次合并功能分支前，应更新本文件。
 
+## Unreleased
+
+### Added
+- 新增 Policy Agent 第一版，负责意图、执行模式、工具需求、Memory 参与、确认需求和风险等级判断。
+
+### Changed
+- Supervisor 改为消费 Policy Agent 的策略决策，专注调度、执行顺序和结果汇总。
+- 记忆类请求不再由策略层判定“写入记忆”，而是标记 `need_memory`，由 Memory Agent 负责 extract、validate、update。
+
 ## 2026-07-14
 
 ### Added

@@ -17,7 +17,7 @@ def test_intent_routing_dataset_covers_core_mvp_scenarios():
     assert {
         "casual_chat",
         "self_status",
-        "memory_update",
+        "memory_context",
         "realtime_query",
         "search_task",
         "research_task",

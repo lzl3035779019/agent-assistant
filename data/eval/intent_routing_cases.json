@@ -73,47 +73,51 @@
   },
   {
     "case_id": "memory-001",
-    "category": "memory_update",
+    "category": "memory_context",
     "user_input": "我叫小林，写到记忆里",
     "expected": {
-      "intent": "memory_update",
-      "task_kind": "memory_task",
+      "intent": "personal_fact_statement",
+      "task_kind": "conversation",
       "execution_mode": "direct_answer",
+      "need_memory": true,
       "need_tools": false,
       "required_tool": "none",
       "should_plan": false
     },
     "llm_decision": {
-      "intent": "memory_update",
-      "task_kind": "memory_task",
+      "intent": "personal_fact_statement",
+      "task_kind": "conversation",
       "execution_mode": "direct_answer",
+      "need_memory": true,
       "need_tools": false,
       "required_tool": "none",
       "should_plan": false
     },
-    "rationale": "用户显式要求写入长期记忆，不应搜索。"
+    "rationale": "用户显式提供稳定个人信息，Policy 只标记 Memory 参与，是否保存由 Memory Agent 判断。"
   },
   {
     "case_id": "memory-002",
-    "category": "memory_update",
+    "category": "memory_context",
     "user_input": "以后回答尽量简洁一点，记住",
     "expected": {
-      "intent": "memory_update",
-      "task_kind": "memory_task",
+      "intent": "personal_fact_statement",
+      "task_kind": "conversation",
       "execution_mode": "direct_answer",
+      "need_memory": true,
       "need_tools": false,
       "required_tool": "none",
       "should_plan": false
     },
     "llm_decision": {
-      "intent": "memory_update",
-      "task_kind": "memory_task",
+      "intent": "personal_fact_statement",
+      "task_kind": "conversation",
       "execution_mode": "direct_answer",
+      "need_memory": true,
       "need_tools": false,
       "required_tool": "none",
       "should_plan": false
     },
-    "rationale": "稳定偏好应进入记忆链路。"
+    "rationale": "稳定偏好应让 Memory Agent 参与，具体抽取、验证和写入仍由 Memory Agent 完成。"
   },
   {
     "case_id": "realtime-001",

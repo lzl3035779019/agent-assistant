@@ -1,6 +1,8 @@
 from typing import Any
 
+from pmaa.agents.memory import MemoryAgent
 from pmaa.llm.client import LLMMessage
+from pmaa.storage.memory_store import SQLiteMemoryStore
 from pmaa.workflow.graph import build_workflow_graph, run_workflow
 
 
@@ -44,6 +46,29 @@ class RecordingWorkflowLLMClient:
         }
 
 
+class StubMemoryConsolidationLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete_text(self, messages: list[LLMMessage]) -> str:
+        return ""
+
+    def complete_json(self, messages: list[LLMMessage]) -> dict[str, Any]:
+        self.calls += 1
+        return {
+            "candidates": [
+                {
+                    "type": "preference",
+                    "content": "用户喜欢看新闻，尤其关注 AI 新闻。",
+                    "source": "user",
+                    "confidence": 0.92,
+                    "should_save": True,
+                    "reason": "稳定兴趣偏好。",
+                }
+            ]
+        }
+
+
 def test_workflow_graph_is_langgraph_state_graph():
     graph = build_workflow_graph()
 
@@ -76,6 +101,30 @@ def test_workflow_returns_answer_sources_and_events():
         "reflection",
         "supervisor",
     ]
+
+
+def test_workflow_consolidates_memory_after_final_answer(tmp_path):
+    store = SQLiteMemoryStore(tmp_path / "memory.sqlite3")
+    llm = StubMemoryConsolidationLLM()
+    memory_agent = MemoryAgent(store, llm_client=llm)
+
+    result = run_workflow(
+        "我喜欢看新闻，搜索今天最火的 AI 新闻",
+        memory_agent=memory_agent,
+        enable_memory=True,
+    )
+
+    saved = store.list_all()
+    memory_event = next(
+        event
+        for event in result.events
+        if event.agent == "memory" and event.event_type == "updated"
+    )
+
+    assert llm.calls == 1
+    assert len(saved) == 1
+    assert "喜欢看新闻" in saved[0].content
+    assert memory_event.output["saved_count"] == 1
 
 
 def test_workflow_passes_conversation_context_to_llm_agents():

@@ -145,7 +145,7 @@ def build_workflow_graph(
     reflector = ReflectionAgent(llm_client=active_llm_client)
     active_memory_agent = memory_agent if enable_memory else None
     if active_memory_agent is None and enable_memory:
-        active_memory_agent = MemoryAgent()
+        active_memory_agent = MemoryAgent(llm_client=active_llm_client)
     active_skill_registry = skill_registry if enable_skills else None
     if active_skill_registry is None and enable_skills:
         active_skill_registry = LocalSkillRegistry()
@@ -543,7 +543,11 @@ def build_workflow_graph(
             return {}
         final_result = state.get("final_result")
         answer = final_result.answer if final_result is not None else state.get("draft_answer", "")
-        candidates = active_memory_agent.extract(state["user_input"], answer)
+        candidates = active_memory_agent.consolidate(
+            state["user_input"],
+            answer,
+            conversation_context=state.get("base_conversation_context", ""),
+        )
         validation_results = [
             active_memory_agent.validate(candidate).model_dump()
             for candidate in candidates

@@ -54,8 +54,7 @@ Run `agent-browser skills get core`.
     registry = LocalSkillRegistry(tmp_path / "skills", tmp_path / "state.json")
 
     def fake_runner(command: list[str], timeout: int):
-        assert command == ["agent-browser", "--version"]
-        return 0, "agent-browser 1.0.0", ""
+        raise AssertionError("Browser tasks should build an action plan, not run health check.")
 
     result = run_workflow(
         "Open the browser and inspect the page",
@@ -78,12 +77,16 @@ Run `agent-browser skills get core`.
     assert "<!-- Selected Skill -->" in result.conversation_context
     assert "Run `agent-browser skills get core`." in result.conversation_context
     assert tool_event.output["tool_name"] == "skill:agent_browser"
-    assert tool_event.output["tool_result"]["success"] is True
-    assert tool_event.output["tool_result"]["action"] == "health_check"
+    assert tool_event.output["tool_result"]["success"] is False
+    assert tool_event.output["tool_result"]["action"] == "browser.task"
     assert "browser.open_url" in tool_event.output["tool_result"]["supported_actions"]
-    assert tool_event.output["tool_result"]["permission_level"] == "safe"
-    assert tool_event.output["tool_result"]["rollback"]["status"] == "not_required"
-    assert tool_event.output["tool_result"]["stdout"] == "agent-browser 1.0.0"
+    assert "browser.task" in tool_event.output["tool_result"]["supported_actions"]
+    assert tool_event.output["tool_result"]["permission_level"] == "network"
+    assert tool_event.output["tool_result"]["status"] == "confirmation_required"
+    assert result.pending_confirmation["action"] == "browser.task"
+    assert result.pending_confirmation["plan"]["goal"] == "Open the browser and inspect the page"
+    assert result.pending_confirmation["plan"]["steps"] == ["检查页面"]
+    assert result.final_result is None
 
 
 def test_workflow_stops_when_skill_action_requires_confirmation(tmp_path):
@@ -147,7 +150,7 @@ Run `agent-browser skills get core`.
     assert result.events[-1].event_type == "await_confirmation"
 
 
-def test_workflow_builds_browser_open_url_confirmation_from_user_input(tmp_path):
+def test_workflow_builds_browser_task_confirmation_from_user_input(tmp_path):
     skill_dir = tmp_path / "skills" / "agent_browser"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -177,6 +180,7 @@ Run `agent-browser skills get core`.
         ),
     )
 
-    assert result.pending_confirmation["action"] == "browser.open_url"
-    assert result.pending_confirmation["plan"]["url"] == "https://www.baidu.com"
+    assert result.pending_confirmation["action"] == "browser.task"
+    assert result.pending_confirmation["plan"]["start_url"] == "https://www.baidu.com"
+    assert result.pending_confirmation["plan"]["steps"] == ["打开网页"]
     assert result.final_result is None

@@ -145,8 +145,12 @@ def test_browser_tool_input_searches_official_site_when_url_is_missing():
 
     assert search_queries == ["Cursor 官网"]
     assert result == {
-        "action": "browser.open_url",
-        "args": {"url": "https://www.cursor.com"},
+        "action": "browser.task",
+        "args": {
+            "goal": "打开 Cursor 官网",
+            "start_url": "https://www.cursor.com",
+            "steps": ["打开网页"],
+        },
     }
 
 
@@ -165,12 +169,16 @@ def test_browser_tool_input_does_not_search_when_url_is_present():
     )
 
     assert result == {
-        "action": "browser.open_url",
-        "args": {"url": "https://openai.com"},
+        "action": "browser.task",
+        "args": {
+            "goal": "打开 https://openai.com",
+            "start_url": "https://openai.com",
+            "steps": ["打开网页"],
+        },
     }
 
 
-def test_browser_tool_input_keeps_generic_browser_tasks_unchanged():
+def test_browser_tool_input_builds_task_for_generic_browser_tasks():
     registry = ToolRegistry()
     search_queries: list[str] = []
 
@@ -193,7 +201,32 @@ def test_browser_tool_input_keeps_generic_browser_tasks_unchanged():
     )
 
     assert search_queries == []
-    assert result == "Open the browser and inspect the page"
+    assert result == {
+        "action": "browser.task",
+        "args": {
+            "goal": "Open the browser and inspect the page",
+            "steps": ["检查页面"],
+        },
+    }
+
+
+def test_browser_tool_input_builds_task_with_screenshot_step():
+    registry = ToolRegistry()
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "打开 https://example.com 并截图",
+        registry,
+    )
+
+    assert result == {
+        "action": "browser.task",
+        "args": {
+            "goal": "打开 https://example.com 并截图",
+            "start_url": "https://example.com",
+            "steps": ["打开网页", "截图"],
+        },
+    }
 
 
 def test_workflow_consolidates_memory_after_final_answer(tmp_path):

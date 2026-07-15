@@ -80,6 +80,8 @@ def _tool_input_for_direct_call(
 ) -> object:
     if not tool_name.startswith("skill:"):
         return user_input
+    if not _is_browser_skill_tool(tool_name):
+        return user_input
     url = _extract_url_to_open(user_input)
     if (
         not url
@@ -88,12 +90,45 @@ def _tool_input_for_direct_call(
         and _should_resolve_site_with_search(user_input)
     ):
         url = _resolve_official_site_url(user_input, registry)
-    if not url:
-        return user_input
-    return {
-        "action": "browser.open_url",
-        "args": {"url": url},
+    return _build_browser_task_request(user_input, url)
+
+
+def _is_browser_skill_tool(tool_name: str) -> bool:
+    normalized = tool_name.removeprefix("skill:").lower()
+    return "browser" in normalized
+
+
+def _build_browser_task_request(user_input: str, start_url: str = "") -> dict[str, object]:
+    args: dict[str, object] = {
+        "goal": user_input.strip(),
+        "steps": _infer_browser_steps(user_input, start_url),
     }
+    if start_url:
+        args["start_url"] = start_url
+    return {
+        "action": "browser.task",
+        "args": args,
+    }
+
+
+def _infer_browser_steps(user_input: str, start_url: str = "") -> list[str]:
+    text = user_input.lower()
+    steps: list[str] = []
+    if start_url:
+        steps.append("打开网页")
+    if any(marker in text for marker in ("截图", "截屏", "screenshot", "capture")):
+        steps.append("截图")
+    if any(marker in text for marker in ("点击", "click")):
+        steps.append("点击页面元素")
+    if any(marker in text for marker in ("填写", "填表", "表单", "fill", "form")):
+        steps.append("填写表单")
+    if any(marker in text for marker in ("抽取", "提取", "抓取", "读取", "read", "extract", "scrape")):
+        steps.append("抽取页面内容")
+    if any(marker in text for marker in ("检查", "测试", "inspect", "test", "qa")):
+        steps.append("检查页面")
+    if not steps:
+        steps.append("执行浏览器任务")
+    return steps
 
 
 def _resolve_official_site_url(user_input: str, registry: ToolRegistry) -> str:

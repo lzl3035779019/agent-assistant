@@ -34,11 +34,12 @@ class MemoryAgent:
                 )
             )
 
-        if any(keyword in text for keyword in ["我喜欢", "我偏好", "我希望", "以后回答", "回答简洁", "回答详细"]):
+        preference_text = self._extract_preference_text(text)
+        if preference_text:
             candidates.append(
                 MemoryCandidate(
                     type="preference",
-                    content=self._preference_content(text),
+                    content=self._preference_content(preference_text),
                     source="user",
                     confidence=0.86,
                 )
@@ -105,6 +106,32 @@ class MemoryAgent:
         if "详细" in text:
             return "用户希望回答更详细。"
         return f"用户偏好：{text}"
+
+    @staticmethod
+    def _extract_preference_text(text: str) -> str:
+        preference_markers = ["我喜欢", "我偏好", "我希望", "以后回答", "回答简洁", "回答详细"]
+        if not any(marker in text for marker in preference_markers):
+            return ""
+        stop_markers = [
+            "你可以",
+            "可以给我",
+            "帮我",
+            "给我",
+            "请问",
+            "推荐",
+            "搜索",
+            "查询",
+            "吗",
+            "？",
+            "?",
+        ]
+        end = len(text)
+        for marker in stop_markers:
+            index = text.find(marker)
+            if index > 0:
+                end = min(end, index)
+        preference = text[:end].strip(" ，,。；;")
+        return preference
 
     @staticmethod
     def _contains_sensitive_content(lowered_content: str) -> bool:

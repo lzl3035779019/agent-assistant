@@ -187,7 +187,7 @@ class PolicyAgent:
                 confidence=0.86,
                 reason="用户请求明确，且不需要工具或复杂规划。",
             )
-        if self._has_user_conversation_context(conversation_context):
+        if self._is_context_dependent_follow_up(normalized_input, conversation_context):
             return PolicyDecision(
                 intent="follow_up",
                 task_kind="contextual_task",
@@ -196,7 +196,7 @@ class PolicyAgent:
                 required_tool="search",
                 should_plan=True,
                 confidence=0.82,
-                reason="存在历史上下文，短追问也应进入任务工作流。",
+                reason="当前输入依赖历史上下文，进入上下文任务工作流。",
             )
         if self._has_workflow_keyword(normalized_input):
             task_kind = self._guess_task_kind(normalized_input)
@@ -307,6 +307,37 @@ class PolicyAgent:
             if marker in cleaned:
                 cleaned = cleaned.split(marker, 1)[0].strip()
         return bool(cleaned)
+
+    @classmethod
+    def _is_context_dependent_follow_up(
+        cls,
+        normalized_input: str,
+        conversation_context: str,
+    ) -> bool:
+        if not cls._has_user_conversation_context(conversation_context):
+            return False
+        if len(normalized_input) > 40:
+            return False
+        follow_up_markers = [
+            "它",
+            "这个",
+            "那个",
+            "上面",
+            "刚才",
+            "继续",
+            "还有呢",
+            "还有什么",
+            "区别呢",
+            "缺点",
+            "优点",
+            "怎么做",
+            "为什么",
+            "then",
+            "it ",
+            "that",
+            "this",
+        ]
+        return any(marker in normalized_input for marker in follow_up_markers)
 
     def _classify_by_llm(
         self,

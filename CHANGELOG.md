@@ -12,6 +12,10 @@
 - Supervisor 改为消费 Policy Agent 的策略决策，专注调度、执行顺序和结果汇总。
 - 记忆类请求不再由策略层判定“写入记忆”，而是标记 `need_memory`，由 Memory Agent 负责 extract、validate、update。
 - Agent 执行过程展示不再把 Supervisor 策略事件渲染成整块 JSON，而是格式化为可读字段。
+- Memory Agent 可从“偏好描述 + 当前任务请求”的混合输入中抽取稳定偏好，避免把整句任务请求写入长期记忆。
+
+### Fixed
+- 修复 Policy Agent 只要存在历史上下文就误判为 follow-up 的问题，现在仅对明显依赖上下文的短追问使用历史上下文路由。
 
 ## 2026-07-14
 

@@ -59,6 +59,24 @@ def test_memory_extract_validate_update_and_retrieve(tmp_path):
     assert retrieved[0].usage_count == 1
 
 
+def test_memory_extracts_preferences_from_mixed_request(tmp_path):
+    store = SQLiteMemoryStore(tmp_path / "memory.sqlite3")
+    agent = MemoryAgent(store)
+
+    candidates = agent.extract(
+        "我喜欢跑步打游戏，喜欢旅游，你可以给我推荐几个避暑的旅游胜地吗",
+        "可以。",
+    )
+    saved = agent.update(candidates)
+
+    assert len(saved) == 1
+    assert saved[0].type == "preference"
+    assert "跑步" in saved[0].content
+    assert "游戏" in saved[0].content
+    assert "旅游" in saved[0].content
+    assert "推荐" not in saved[0].content
+
+
 def test_memory_update_ignores_non_worth_saving_query(tmp_path):
     store = SQLiteMemoryStore(tmp_path / "memory.sqlite3")
     agent = MemoryAgent(store)

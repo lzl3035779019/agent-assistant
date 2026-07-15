@@ -225,6 +225,11 @@ class PolicyAgent:
         if required_tool != "none" and not self._is_supported_tool(required_tool):
             required_tool = "search"
             reason_suffixes.append("未注册的工具已归一为 search。")
+        if self._should_force_search_tool(decision, required_tool):
+            required_tool = "search"
+            reason_suffixes.append(
+                "Realtime/search information requests use the built-in search tool unless browser automation is explicitly requested."
+            )
         updates["required_tool"] = required_tool
 
         tool_required = decision.need_tools or required_tool != "none"
@@ -237,6 +242,10 @@ class PolicyAgent:
             requires_confirmation = True
             if risk_level == "low":
                 risk_level = "medium"
+        elif required_tool == "search":
+            requires_confirmation = False
+            if risk_level == "medium":
+                risk_level = "low"
         updates["requires_confirmation"] = requires_confirmation
         updates["risk_level"] = risk_level
 
@@ -297,6 +306,44 @@ class PolicyAgent:
     @classmethod
     def _is_supported_tool(cls, tool_name: str) -> bool:
         return tool_name in cls.supported_tools or tool_name.startswith("skill:")
+
+    @staticmethod
+    def _should_force_search_tool(decision: PolicyDecision, required_tool: str) -> bool:
+        if required_tool != "skill:agent_browser":
+            return False
+        text = " ".join([decision.intent, decision.task_kind, decision.reason]).lower()
+        realtime_markers = [
+            "realtime_query",
+            "search_task",
+            "news",
+            "weather",
+            "latest",
+            "today",
+            "current",
+            "实时",
+            "新闻",
+            "天气",
+            "最新",
+            "今天",
+            "当前",
+        ]
+        browser_action_markers = [
+            "open_url",
+            "browser_navigation",
+            "browser_task",
+            "open website",
+            "click",
+            "fill form",
+            "screenshot",
+            "打开网页",
+            "打开网站",
+            "点击",
+            "填写表单",
+            "截图",
+        ]
+        return any(marker in text for marker in realtime_markers) and not any(
+            marker in text for marker in browser_action_markers
+        )
 
     @staticmethod
     def _has_user_conversation_context(conversation_context: str) -> bool:

@@ -103,6 +103,33 @@ def test_policy_uses_llm_for_non_obvious_context_dependency():
     assert decision.intent != "follow_up"
 
 
+def test_policy_forces_realtime_news_queries_to_search_over_browser_skill():
+    llm = StubPolicyLLM(
+        {
+            "intent": "news_query",
+            "task_kind": "realtime_query",
+            "execution_mode": "tool_call",
+            "need_memory": False,
+            "need_tools": True,
+            "required_tool": "skill:agent_browser",
+            "should_plan": False,
+            "requires_confirmation": True,
+            "risk_level": "medium",
+            "confidence": 0.95,
+            "reason": "LLM selected browser skill for news extraction.",
+        }
+    )
+    policy = PolicyAgent(llm_client=llm)
+
+    decision = policy.decide("我喜欢了解新闻，帮我推送今天最火的ai有关的新闻")
+
+    assert decision.task_kind == "realtime_query"
+    assert decision.required_tool == "search"
+    assert decision.execution_mode == "tool_call"
+    assert decision.requires_confirmation is False
+    assert decision.risk_level == "low"
+
+
 def test_supervisor_event_includes_policy_fields_for_memory_route(tmp_path):
     from pmaa.agents.memory import MemoryAgent
     from pmaa.storage.memory_store import SQLiteMemoryStore

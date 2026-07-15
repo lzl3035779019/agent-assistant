@@ -9,12 +9,39 @@ def build_thought_text(view: dict[str, Any] | None) -> str:
         return "等待运行工作流。"
     lines: list[str] = []
     for index, event in enumerate(view.get("events", []), start=1):
+        if _is_policy_event(event):
+            lines.append(_format_policy_event(index, event))
+            continue
         payload = json.dumps(event.get("output", {}), ensure_ascii=False)
         lines.append(
             f"[{index}] {event.get('label', event.get('agent', 'Agent'))} - "
             f"{event.get('event_type', 'completed')} {payload}"
         )
     return "\n".join(lines) or "暂无执行过程。"
+
+
+def build_policy_card_markdown(view: dict[str, Any] | None) -> str:
+    event = _find_policy_event(view)
+    if event is None:
+        return ""
+    output = event.get("output", {})
+    return "\n".join(
+        [
+            "#### 策略决策",
+            "",
+            f"- 意图：`{output.get('intent', 'unknown')}`",
+            f"- 任务类型：`{output.get('task_kind', 'unknown')}`",
+            f"- 执行模式：`{output.get('execution_mode', 'unknown')}`",
+            f"- Memory 参与：`{_bool_label(output.get('need_memory'))}`",
+            f"- 工具调用：`{_bool_label(output.get('need_tools'))}`",
+            f"- 目标工具：`{output.get('required_tool', 'none')}`",
+            f"- 复杂规划：`{_bool_label(output.get('should_plan'))}`",
+            f"- 用户确认：`{_bool_label(output.get('requires_confirmation'))}`",
+            f"- 风险等级：`{output.get('risk_level', 'low')}`",
+            f"- 置信度：`{output.get('confidence', 0)}`",
+            f"- 原因：{output.get('reason', '')}",
+        ]
+    )
 
 
 def render_user_message(content: str) -> str:
@@ -36,9 +63,11 @@ def render_assistant_message(
     else:
         thought = ""
         if view is not None:
+            policy_card = markdown_to_html(build_policy_card_markdown(view))
             thought = f"""
             <details class="thought-details" open>
               <summary>思考过程 / Agent 执行过程</summary>
+              <div class="policy-card">{policy_card}</div>
               <pre>{escape(build_thought_text(view))}</pre>
             </details>
             """
@@ -122,3 +151,48 @@ def _inline_markdown(text: str) -> str:
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
     escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
     return escaped
+
+
+def _find_policy_event(view: dict[str, Any] | None) -> dict[str, Any] | None:
+    if view is None:
+        return None
+    for event in view.get("events", []):
+        if _is_policy_event(event):
+            return event
+    return None
+
+
+def _is_policy_event(event: dict[str, Any]) -> bool:
+    output = event.get("output", {})
+    return (
+        event.get("agent") == "supervisor"
+        and event.get("event_type") == "completed"
+        and "intent" in output
+        and "execution_mode" in output
+    )
+
+
+def _format_policy_event(index: int, event: dict[str, Any]) -> str:
+    output = event.get("output", {})
+    fields = [
+        ("intent", output.get("intent", "unknown")),
+        ("task_kind", output.get("task_kind", "unknown")),
+        ("execution_mode", output.get("execution_mode", "unknown")),
+        ("need_memory", _bool_label(output.get("need_memory"))),
+        ("need_tools", _bool_label(output.get("need_tools"))),
+        ("required_tool", output.get("required_tool", "none")),
+        ("should_plan", _bool_label(output.get("should_plan"))),
+        ("requires_confirmation", _bool_label(output.get("requires_confirmation"))),
+        ("risk_level", output.get("risk_level", "low")),
+        ("confidence", output.get("confidence", 0)),
+        ("reason", output.get("reason", "")),
+    ]
+    detail = "\n".join(f"  {key}: {value}" for key, value in fields)
+    return (
+        f"[{index}] 策略决策 - {event.get('event_type', 'completed')}\n"
+        f"{detail}"
+    )
+
+
+def _bool_label(value: object) -> str:
+    return "是" if bool(value) else "否"

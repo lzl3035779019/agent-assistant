@@ -25,6 +25,7 @@ from pmaa.skills.runtime import SkillRuntimeInstaller, SkillRuntimeInspector
 from pmaa.skills.tool_binding import SkillToolBindingService
 from pmaa.ui.action_audit import append_action_audit, build_action_audit_markdown
 from pmaa.ui.chat_render import (
+    build_policy_card_markdown,
     build_thought_text,
     normalize_markdown_content,
     render_user_message,
@@ -248,6 +249,29 @@ st.markdown(
         font-size: 13px;
         line-height: 1.65;
         font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+    .policy-card {
+        border: 1px solid #e7d8b8;
+        border-radius: 8px;
+        background: #fffdf8;
+        padding: 10px 12px;
+        margin-top: 10px;
+        margin-bottom: 10px;
+        color: #29251f;
+    }
+    .policy-card h4 {
+        margin: 0 0 8px 0;
+        color: #4c3d18;
+        font-size: 14px;
+    }
+    .policy-card ul {
+        margin: 0 0 0 18px;
+        padding: 0;
+    }
+    .policy-card li {
+        margin: 3px 0;
+        color: #2c2822;
+        font-size: 13px;
     }
     .readonly-box, .field-title { display: none !important; }
     div[class*="st-key-chat_input_bar"] {
@@ -884,16 +908,6 @@ def render_wiki_job_watcher() -> None:
     st.rerun(scope="app")
 
 
-def build_thought_text(view: dict | None) -> str:
-    if view is None:
-        return "等待运行工作流。"
-    lines: list[str] = []
-    for index, event in enumerate(view["events"], start=1):
-        payload = json.dumps(event["output"], ensure_ascii=False, indent=2)
-        lines.append(f"[{index}] {event['label']} - {event['event_type']}\n{payload}")
-    return "\n\n".join(lines)
-
-
 def resolve_pending_confirmation(approved: bool) -> None:
     view = st.session_state.get("task_view") or {}
     pending_confirmation = view.get("pending_confirmation") or {}
@@ -1521,6 +1535,10 @@ def render_assistant_message_native(message) -> None:
             return
         if message.view is not None:
             with st.expander("思考过程 / Agent 执行过程", expanded=False):
+                policy_card = build_policy_card_markdown(message.view)
+                if policy_card:
+                    with st.container(border=True):
+                        st.markdown(policy_card)
                 st.code(build_thought_text(message.view), language="text")
         with st.container(border=True):
             if message_has_pending_confirmation(message):
@@ -1854,6 +1872,10 @@ with center:
                 live_view = build_live_view(live_events)
                 with thought_slot.container():
                     with st.expander("思考过程 / Agent 执行过程", expanded=True):
+                        policy_card = build_policy_card_markdown(live_view)
+                        if policy_card:
+                            with st.container(border=True):
+                                st.markdown(policy_card)
                         st.code("正在连接流式工作流...", language="text")
                 with answer_slot.container(border=True):
                     st.markdown("正在执行任务...")
@@ -1869,6 +1891,10 @@ with center:
                             live_view = build_live_view(live_events)
                             with thought_slot.container():
                                 with st.expander("思考过程 / Agent 执行过程", expanded=True):
+                                    policy_card = build_policy_card_markdown(live_view)
+                                    if policy_card:
+                                        with st.container(border=True):
+                                            st.markdown(policy_card)
                                     st.code(build_thought_text(live_view), language="text")
                         elif event_type == "workflow_completed":
                             workflow_result = WorkflowResult.model_validate(

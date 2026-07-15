@@ -6,10 +6,12 @@
 
 ### Added
 - 新增 Policy Agent 第一版，负责意图、执行模式、工具需求、Memory 参与、确认需求和风险等级判断。
+- 在 Streamlit 思考过程区域新增 Policy 策略卡片，清晰展示意图、执行模式、工具需求、确认需求和风险等级。
 
 ### Changed
 - Supervisor 改为消费 Policy Agent 的策略决策，专注调度、执行顺序和结果汇总。
 - 记忆类请求不再由策略层判定“写入记忆”，而是标记 `need_memory`，由 Memory Agent 负责 extract、validate、update。
+- Agent 执行过程展示不再把 Supervisor 策略事件渲染成整块 JSON，而是格式化为可读字段。
 
 ## 2026-07-14
 

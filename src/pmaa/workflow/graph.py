@@ -90,6 +90,13 @@ def _extract_url_to_open(user_input: str) -> str:
     if match:
         return match.group(0)
     normalized = user_input.lower()
+    product_official_sites = [
+        (("文心一言", "文小言", "ernie bot", "yiyan"), "https://yiyan.baidu.com"),
+        (("文心大模型", "wenxin"), "https://wenxin.baidu.com"),
+    ]
+    for keywords, url in product_official_sites:
+        if any(keyword in normalized for keyword in keywords):
+            return url
     if "百度" in normalized or "baidu" in normalized:
         return "https://www.baidu.com"
     domain_match = re.search(r"\b[a-z0-9.-]+\.[a-z]{2,}\b", normalized)

@@ -3,7 +3,7 @@ from typing import Any
 from pmaa.agents.memory import MemoryAgent
 from pmaa.llm.client import LLMMessage
 from pmaa.storage.memory_store import SQLiteMemoryStore
-from pmaa.workflow.graph import build_workflow_graph, run_workflow
+from pmaa.workflow.graph import _extract_url_to_open, build_workflow_graph, run_workflow
 
 
 class RecordingWorkflowLLMClient:
@@ -101,6 +101,12 @@ def test_workflow_returns_answer_sources_and_events():
         "reflection",
         "supervisor",
     ]
+
+
+def test_extract_url_to_open_prefers_product_official_site_over_baidu_homepage():
+    query = "\u6253\u5f00\u767e\u5ea6\u6587\u5fc3\u4e00\u8a00\u5927\u6a21\u578b\u7684\u5b98\u7f51"
+
+    assert _extract_url_to_open(query) == "https://yiyan.baidu.com"
 
 
 def test_workflow_consolidates_memory_after_final_answer(tmp_path):

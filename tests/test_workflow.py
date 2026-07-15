@@ -2,8 +2,15 @@ from typing import Any
 
 from pmaa.agents.memory import MemoryAgent
 from pmaa.llm.client import LLMMessage
+from pmaa.schemas.task import Source
 from pmaa.storage.memory_store import SQLiteMemoryStore
-from pmaa.workflow.graph import _extract_url_to_open, build_workflow_graph, run_workflow
+from pmaa.tools.registry import ToolRegistry
+from pmaa.workflow.graph import (
+    _extract_url_to_open,
+    _tool_input_for_direct_call,
+    build_workflow_graph,
+    run_workflow,
+)
 
 
 class RecordingWorkflowLLMClient:
@@ -107,6 +114,86 @@ def test_extract_url_to_open_prefers_product_official_site_over_baidu_homepage()
     query = "\u6253\u5f00\u767e\u5ea6\u6587\u5fc3\u4e00\u8a00\u5927\u6a21\u578b\u7684\u5b98\u7f51"
 
     assert _extract_url_to_open(query) == "https://yiyan.baidu.com"
+
+
+def test_browser_tool_input_searches_official_site_when_url_is_missing():
+    registry = ToolRegistry()
+    search_queries: list[str] = []
+
+    def fake_search(query: str) -> list[Source]:
+        search_queries.append(query)
+        return [
+            Source(
+                title="Cursor Docs",
+                url="https://docs.cursor.com",
+                snippet="Documentation for Cursor.",
+            ),
+            Source(
+                title="Cursor - Official Site",
+                url="https://www.cursor.com",
+                snippet="The official website for Cursor.",
+            ),
+        ]
+
+    registry.register("search", fake_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "打开 Cursor 官网",
+        registry,
+    )
+
+    assert search_queries == ["Cursor 官网"]
+    assert result == {
+        "action": "browser.open_url",
+        "args": {"url": "https://www.cursor.com"},
+    }
+
+
+def test_browser_tool_input_does_not_search_when_url_is_present():
+    registry = ToolRegistry()
+
+    def fail_search(query: str) -> list[Source]:
+        raise AssertionError("search should not be called for explicit URLs")
+
+    registry.register("search", fail_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "打开 https://openai.com",
+        registry,
+    )
+
+    assert result == {
+        "action": "browser.open_url",
+        "args": {"url": "https://openai.com"},
+    }
+
+
+def test_browser_tool_input_keeps_generic_browser_tasks_unchanged():
+    registry = ToolRegistry()
+    search_queries: list[str] = []
+
+    def fake_search(query: str) -> list[Source]:
+        search_queries.append(query)
+        return [
+            Source(
+                title="Browser Official Site",
+                url="https://browser.example.com",
+                snippet="Official website.",
+            )
+        ]
+
+    registry.register("search", fake_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "Open the browser and inspect the page",
+        registry,
+    )
+
+    assert search_queries == []
+    assert result == "Open the browser and inspect the page"
 
 
 def test_workflow_consolidates_memory_after_final_answer(tmp_path):

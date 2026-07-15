@@ -73,16 +73,132 @@ def _sources_and_retrieval_diagnostic(tool_result: object) -> tuple[list, dict]:
     return [], {}
 
 
-def _tool_input_for_direct_call(tool_name: str, user_input: str) -> object:
+def _tool_input_for_direct_call(
+    tool_name: str,
+    user_input: str,
+    registry: ToolRegistry | None = None,
+) -> object:
     if not tool_name.startswith("skill:"):
         return user_input
     url = _extract_url_to_open(user_input)
+    if (
+        not url
+        and registry is not None
+        and registry.has("search")
+        and _should_resolve_site_with_search(user_input)
+    ):
+        url = _resolve_official_site_url(user_input, registry)
     if not url:
         return user_input
     return {
         "action": "browser.open_url",
         "args": {"url": url},
     }
+
+
+def _resolve_official_site_url(user_input: str, registry: ToolRegistry) -> str:
+    query = _official_site_search_query(user_input)
+    if not query:
+        return ""
+    try:
+        results = registry.call("search", query)
+    except Exception:
+        return ""
+    if not isinstance(results, list):
+        return ""
+    return _select_official_site_url(results)
+
+
+def _should_resolve_site_with_search(user_input: str) -> bool:
+    text = user_input.lower()
+    has_open_intent = any(
+        marker in text
+        for marker in (
+            "打开",
+            "访问",
+            "进入",
+            "open",
+            "visit",
+        )
+    )
+    has_site_target = any(
+        marker in text
+        for marker in (
+            "官网",
+            "官方网站",
+            "网站",
+            "official",
+            "website",
+            "site",
+        )
+    )
+    return has_open_intent and has_site_target
+
+
+def _official_site_search_query(user_input: str) -> str:
+    query = user_input.strip()
+    query = re.sub(
+        r"^(打开|访问|进入|打开一下|帮我打开|open|visit)\s*",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip()
+    query = re.sub(r"(的)?(网页|网站|页面)\s*$", "", query).strip()
+    if not query:
+        return ""
+    lowered = query.lower()
+    if "官网" not in query and "official" not in lowered:
+        query = f"{query} 官网"
+    return query
+
+
+def _select_official_site_url(results: list[object]) -> str:
+    candidates = [_source_url(result) for result in results]
+    candidates = [url for url in candidates if url]
+    if not candidates:
+        return ""
+
+    best_url = candidates[0]
+    best_score = -1
+    for result in results:
+        url = _source_url(result)
+        if not url:
+            continue
+        text = _source_text(result)
+        score = 0
+        if any(marker in text for marker in ("official site", "official website", "官网", "官方网站")):
+            score += 10
+        if any(marker in text for marker in ("docs", "documentation", "文档", "百科", "wikipedia")):
+            score -= 3
+        if _looks_like_homepage(url):
+            score += 2
+        if score > best_score:
+            best_score = score
+            best_url = url
+    return best_url
+
+
+def _source_url(source: object) -> str:
+    if isinstance(source, dict):
+        return str(source.get("url", "") or "")
+    return str(getattr(source, "url", "") or "")
+
+
+def _source_text(source: object) -> str:
+    if isinstance(source, dict):
+        parts = [source.get("title", ""), source.get("snippet", ""), source.get("url", "")]
+    else:
+        parts = [
+            getattr(source, "title", ""),
+            getattr(source, "snippet", ""),
+            getattr(source, "url", ""),
+        ]
+    return " ".join(str(part) for part in parts if part).lower()
+
+
+def _looks_like_homepage(url: str) -> bool:
+    match = re.match(r"https?://[^/]+/?$", url, flags=re.IGNORECASE)
+    return bool(match)
 
 
 def _extract_url_to_open(user_input: str) -> str:
@@ -421,7 +537,7 @@ def build_workflow_graph(
         )
         tool_result = tool_agent.invoke(
             tool_name,
-            _tool_input_for_direct_call(tool_name, state["user_input"]),
+            _tool_input_for_direct_call(tool_name, state["user_input"], registry),
         )
         sources, retrieval_diagnostic = _sources_and_retrieval_diagnostic(tool_result)
         pending_confirmation = _pending_confirmation_from_tool_result(tool_result)

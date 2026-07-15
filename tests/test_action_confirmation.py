@@ -100,3 +100,23 @@ def test_confirm_pending_action_reports_missing_agent_browser_runtime():
     assert result["approved"] is True
     assert result["status"] == "failed"
     assert result["execution"]["status"] == "missing_runtime"
+
+
+def test_confirm_pending_action_reports_browser_task_runner_exception():
+    executor_registry = create_default_executor_registry(
+        command_exists=lambda command: True,
+        command_runner=lambda command, timeout: (_ for _ in ()).throw(
+            FileNotFoundError("agent-browser")
+        ),
+    )
+
+    result = confirm_pending_action(
+        BROWSER_TASK_CONFIRMATION,
+        approved=True,
+        executor_registry=executor_registry,
+    )
+
+    assert result["approved"] is True
+    assert result["status"] == "failed"
+    assert result["execution"]["status"] == "failed"
+    assert "agent-browser" in result["execution"]["reason"]

@@ -1,5 +1,6 @@
 from uuid import uuid4
 import re
+from urllib.parse import urlparse
 
 from langgraph.graph import END, START, StateGraph
 
@@ -141,7 +142,7 @@ def _resolve_official_site_url(user_input: str, registry: ToolRegistry) -> str:
         return ""
     if not isinstance(results, list):
         return ""
-    return _select_official_site_url(results)
+    return _homepage_url(_select_official_site_url(results))
 
 
 def _should_resolve_site_with_search(user_input: str) -> bool:
@@ -234,6 +235,13 @@ def _source_text(source: object) -> str:
 def _looks_like_homepage(url: str) -> bool:
     match = re.match(r"https?://[^/]+/?$", url, flags=re.IGNORECASE)
     return bool(match)
+
+
+def _homepage_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return url
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _extract_url_to_open(user_input: str) -> str:

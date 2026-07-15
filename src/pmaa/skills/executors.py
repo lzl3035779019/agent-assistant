@@ -121,7 +121,15 @@ def _build_browser_task_executor(
                     "reason": f"Unsupported browser task command: {command}",
                     "completed_commands": completed,
                 }
-            returncode, stdout, stderr = command_runner(args, timeout_seconds)
+            try:
+                returncode, stdout, stderr = command_runner(args, timeout_seconds)
+            except Exception as exc:
+                return {
+                    "status": "failed",
+                    "reason": str(exc),
+                    "completed_commands": completed,
+                    "failed_command": args,
+                }
             entry = {
                 "command": args,
                 "returncode": returncode,

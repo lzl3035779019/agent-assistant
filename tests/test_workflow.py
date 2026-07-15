@@ -154,6 +154,36 @@ def test_browser_tool_input_searches_official_site_when_url_is_missing():
     }
 
 
+def test_browser_tool_input_normalizes_search_result_to_site_homepage_for_official_site():
+    registry = ToolRegistry()
+
+    def fake_search(query: str) -> list[Source]:
+        return [
+            Source(
+                title="Vercel Blog",
+                url="https://vercel.com/blog",
+                snippet="Updates from Vercel official website.",
+            )
+        ]
+
+    registry.register("search", fake_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "打开 Vercel 官网",
+        registry,
+    )
+
+    assert result == {
+        "action": "browser.task",
+        "args": {
+            "goal": "打开 Vercel 官网",
+            "start_url": "https://vercel.com",
+            "steps": ["打开网页"],
+        },
+    }
+
+
 def test_browser_tool_input_does_not_search_when_url_is_present():
     registry = ToolRegistry()
 

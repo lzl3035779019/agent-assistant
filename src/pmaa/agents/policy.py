@@ -187,7 +187,7 @@ class PolicyAgent:
                 confidence=0.86,
                 reason="用户请求明确，且不需要工具或复杂规划。",
             )
-        if self._is_context_dependent_follow_up(normalized_input, conversation_context):
+        if self._is_obvious_context_follow_up(normalized_input, conversation_context):
             return PolicyDecision(
                 intent="follow_up",
                 task_kind="contextual_task",
@@ -339,6 +339,48 @@ class PolicyAgent:
         ]
         return any(marker in normalized_input for marker in follow_up_markers)
 
+    @classmethod
+    def _is_obvious_context_follow_up(
+        cls,
+        normalized_input: str,
+        conversation_context: str,
+    ) -> bool:
+        if not cls._has_user_conversation_context(conversation_context):
+            return False
+        text = normalized_input.strip()
+        if not text or len(text) > 40:
+            return False
+        exact_follow_ups = {
+            "继续",
+            "继续说",
+            "继续讲",
+            "接着说",
+            "还有呢",
+            "还有什么",
+            "然后呢",
+            "那它呢",
+            "那这个呢",
+            "那那个呢",
+            "上面呢",
+            "刚才那个呢",
+            "continue",
+            "go on",
+            "then",
+            "what about it",
+        }
+        if text in exact_follow_ups:
+            return True
+        if len(text) <= 16 and any(marker in text for marker in ["上面", "刚才", "前面"]):
+            return True
+        if "它" in text:
+            return True
+        if re.search(
+            r"^(那|那么)?(它|it|that|this)(呢|是什么|怎么办|怎么做|有什么.*|有哪些.*|.*缺点|.*优点|.*吗|.*\?)?$",
+            text,
+        ):
+            return True
+        return bool(re.search(r"^(那|那么)?(这个|那个)(呢|怎么办|怎么做|有什么|有哪些)$", text))
+
     def _classify_by_llm(
         self,
         user_input: str,
@@ -388,6 +430,17 @@ class PolicyAgent:
                             "Use required_tool=knowledge when the user asks about local, private, "
                             "personal, document, note, wiki, or GBrain knowledge. "
                             "Use required_tool=search for public web freshness."
+                        ),
+                    ),
+                    LLMMessage(
+                        role="system",
+                        content=(
+                            "Context dependency rule: when conversation history exists, first decide "
+                            "whether the current user input can be understood and answered on its own. "
+                            "Only use intent=follow_up and task_kind=contextual_task when the input "
+                            "contains unresolved references, omissions, or continuation requests that "
+                            "require the previous turn. If the input is a complete standalone task, do "
+                            "not route it as follow_up even if history exists."
                         ),
                     ),
                     LLMMessage(

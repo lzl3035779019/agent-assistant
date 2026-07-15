@@ -17,6 +17,7 @@
 ### Fixed
 - 修复 Policy Agent 只要存在历史上下文就误判为 follow-up 的问题，现在仅对明显依赖上下文的短追问使用历史上下文路由。
 
+- Policy Agent 对非明显上下文依赖的输入改由 LLM 判断，避免仅凭“这个/那个”等词误判 follow-up。
 ## 2026-07-14
 
 ### Added

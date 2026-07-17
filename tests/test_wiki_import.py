@@ -1,6 +1,7 @@
 import sys
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from pmaa.tools.mcp_client import MCPClient, MCPServerConfig
 from pmaa.wiki.importer import (
@@ -90,6 +91,112 @@ def test_gbrain_wiki_service_commits_preview_by_import_id(tmp_path):
     assert result.status == "committed"
     assert result.page_count == 2
     assert result.written_slugs == ["concepts/pmaa", "methods/langgraph"]
+
+
+def test_gbrain_wiki_service_deletes_source_and_related_pages(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.delete_source("sources/documents/source-1")
+
+    assert result.status == "deleted"
+    assert result.source_slug == "sources/documents/source-1"
+    assert result.deleted_slugs == [
+        "sources/documents/source-1",
+        "wiki/concept/from-source",
+        "wiki/method/from-source",
+    ]
+    assert result.deleted_edges == 4
+
+
+def test_gbrain_wiki_service_falls_back_to_native_delete_when_bridge_has_no_delete_tool(tmp_path):
+    class BridgeClientWithoutDelete:
+        def list_tools(self):
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name="wiki_import_preview"),
+                    SimpleNamespace(name="wiki_import_commit"),
+                    SimpleNamespace(name="wiki_search"),
+                    SimpleNamespace(name="wiki_get_page"),
+                    SimpleNamespace(name="wiki_visualize"),
+                    SimpleNamespace(name="wiki_overview"),
+                ]
+            )
+
+        def call_tool(self, name, arguments):
+            raise AssertionError(f"unexpected bridge call: {name}")
+
+    class NativeDeleteClient:
+        def __init__(self):
+            self.calls = []
+
+        def list_tools(self):
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name="list_pages"),
+                    SimpleNamespace(name="get_page"),
+                    SimpleNamespace(name="delete_page"),
+                    SimpleNamespace(name="remove_link"),
+                    SimpleNamespace(name="sources_remove"),
+                ]
+            )
+
+        def call_tool(self, name, arguments):
+            self.calls.append((name, arguments))
+            if name == "list_pages":
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "pages": [
+                                        {"slug": "wiki/concept/from-source"},
+                                        {"slug": "wiki/concept/shared"},
+                                    ]
+                                }
+                            ),
+                        }
+                    ]
+                }
+            if name == "get_page":
+                content = {
+                    "wiki/concept/from-source": (
+                        "---\n"
+                        "managed_by: semantic-knowledge-model\n"
+                        "source_slug: sources/documents/source-1\n"
+                        "---\n"
+                    ),
+                    "wiki/concept/shared": (
+                        "---\n"
+                        "managed_by: semantic-knowledge-model\n"
+                        "source_slug: sources/documents/other\n"
+                        "---\n"
+                    ),
+                }[arguments["slug"]]
+                return {"content": [{"type": "text", "text": json.dumps({"content": content})}]}
+            return {"content": [{"type": "text", "text": json.dumps({"ok": True})}]}
+
+    native_client = NativeDeleteClient()
+    service = GBrainWikiService(
+        BridgeClientWithoutDelete(),
+        inbox_dir=tmp_path,
+        native_client=native_client,
+    )
+
+    result = service.delete_source("sources/documents/source-1")
+
+    assert result.status == "deleted"
+    assert result.deleted_slugs == [
+        "wiki/concept/from-source",
+        "sources/documents/source-1",
+    ]
+    assert ("delete_page", {"slug": "wiki/concept/from-source"}) in native_client.calls
+    assert ("delete_page", {"slug": "sources/documents/source-1"}) in native_client.calls
+    assert ("delete_page", {"slug": "wiki/concept/shared"}) not in native_client.calls
+    assert (
+        "sources_remove",
+        {"id": "source-1", "confirm_destructive": True},
+    ) in native_client.calls
 
 
 def test_gbrain_wiki_service_search_get_page_and_visualize(tmp_path):

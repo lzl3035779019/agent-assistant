@@ -215,5 +215,21 @@ def wiki_overview(limit: int = 200) -> str:
     )
 
 
+@mcp.tool()
+def wiki_delete_source(source_slug: str) -> str:
+    return json.dumps(
+        {
+            "status": "deleted",
+            "source_slug": source_slug,
+            "deleted_slugs": [
+                source_slug,
+                "wiki/concept/from-source",
+                "wiki/method/from-source",
+            ],
+            "deleted_edges": 4,
+        }
+    )
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

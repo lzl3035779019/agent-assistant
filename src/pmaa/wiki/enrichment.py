@@ -34,6 +34,7 @@ def enrich_source_with_gbrain_skills(source_slug: str) -> GBrainSkillResult:
         raise ValueError("只允许整理 GBrain 的原始来源页（sources/...）。")
 
     client = _native_client()
+    _ensure_required_tools(client)
     source = _as_dict(client.call_tool("get_page", {"slug": source_slug}))
     if source.get("slug") != source_slug:
         raise RuntimeError(f"未找到原始来源页：{source_slug}")
@@ -107,6 +108,25 @@ def _native_client() -> MCPClient:
             url=settings.gbrain_mcp_url,
         )
     )
+
+
+def _ensure_required_tools(client: MCPClient) -> None:
+    required_tools = {"get_page", "get_skill", "put_page", "add_link"}
+    result = client.list_tools()
+    available_tools = {
+        str(getattr(tool, "name", ""))
+        for tool in getattr(result, "tools", [])
+        if getattr(tool, "name", "")
+    }
+    missing_tools = sorted(required_tools - available_tools)
+    if missing_tools:
+        raise RuntimeError(
+            "GBrain 官方 Skill 整理需要原生 MCP 工具："
+            + "、".join(sorted(required_tools))
+            + "；当前缺少："
+            + "、".join(missing_tools)
+            + "。这通常表示连接到的是 Wiki bridge，或当前 GBrain native MCP 版本未暴露 Skill/写页工具。"
+        )
 
 
 def _run_skill_analysis(

@@ -1,4 +1,5 @@
 import json
+import shutil
 import shlex
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -73,6 +74,20 @@ class LocalSkillRegistry:
         if updated is None:
             raise ValueError(f"Skill does not exist after update: {skill_id}")
         return updated
+
+    def delete(self, skill_id: str) -> SkillRecord:
+        current = self.get(skill_id)
+        if current is None:
+            raise ValueError(f"Skill does not exist: {skill_id}")
+        skill_dir = current.source_path.parent.resolve()
+        skills_root = self._skills_root.resolve()
+        if skills_root not in [skill_dir, *skill_dir.parents]:
+            raise ValueError(f"Refusing to delete skill outside skills root: {skill_id}")
+        shutil.rmtree(skill_dir)
+        state = self._load_state()
+        state.pop(skill_id, None)
+        self._save_state(state)
+        return current
 
     def match_skills(self, query: str, limit: int = 5) -> list[SkillRecord]:
         normalized_query = query.lower()
@@ -217,7 +232,7 @@ class LocalSkillRegistry:
         url: str,
         *,
         overwrite: bool = False,
-        timeout: float = 20,
+        timeout: float = 60,
     ) -> SkillImportResult:
         response = httpx.get(url, timeout=timeout)
         response.raise_for_status()
@@ -231,7 +246,7 @@ class LocalSkillRegistry:
         *,
         skill_name: str = "",
         overwrite: bool = False,
-        timeout: float = 20,
+        timeout: float = 60,
     ) -> SkillImportResult:
         parsed_source, parsed_skill_name = _parse_skill_source(source)
         active_skill_name = skill_name.strip() or parsed_skill_name

@@ -3,6 +3,19 @@ from pmaa.schemas.memory import MemoryCandidate
 from pmaa.storage.memory_store import SQLiteMemoryStore
 
 
+class StubMemoryLLM:
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = 0
+
+    def complete_text(self, messages):
+        return ""
+
+    def complete_json(self, messages):
+        self.calls += 1
+        return self.payload
+
+
 def test_memory_validate_accepts_stable_preference(tmp_path):
     agent = MemoryAgent(SQLiteMemoryStore(tmp_path / "memory.sqlite3"))
     candidate = MemoryCandidate(
@@ -16,6 +29,61 @@ def test_memory_validate_accepts_stable_preference(tmp_path):
 
     assert validation.should_save is True
     assert validation.reason == "stable_memory"
+
+
+def test_memory_validate_accepts_news_as_stable_preference(tmp_path):
+    agent = MemoryAgent(SQLiteMemoryStore(tmp_path / "memory.sqlite3"))
+    candidate = MemoryCandidate(
+        type="preference",
+        content="用户喜欢看新闻，尤其关注 AI 新闻。",
+        source="user",
+        confidence=0.9,
+    )
+
+    validation = agent.validate(candidate)
+
+    assert validation.should_save is True
+    assert validation.reason == "stable_memory"
+
+
+def test_memory_consolidate_uses_llm_to_save_preference_from_task(tmp_path):
+    store = SQLiteMemoryStore(tmp_path / "memory.sqlite3")
+    llm = StubMemoryLLM(
+        {
+            "candidates": [
+                {
+                    "type": "preference",
+                    "content": "用户喜欢看新闻，尤其关注 AI 新闻。",
+                    "source": "user",
+                    "confidence": 0.91,
+                    "should_save": True,
+                    "reason": "这是稳定兴趣偏好，不是一次性搜索任务。",
+                },
+                {
+                    "type": "preference",
+                    "content": "用户想查看今天最火的 AI 新闻。",
+                    "source": "user",
+                    "confidence": 0.8,
+                    "should_save": False,
+                    "reason": "这是当前任务请求，不应进入长期记忆。",
+                },
+            ]
+        }
+    )
+    agent = MemoryAgent(store, llm_client=llm)
+
+    candidates = agent.consolidate(
+        "我喜欢看新闻，帮我找一下今天最火的与ai有关的新闻",
+        "已为你找到几条 AI 新闻。",
+        conversation_context="",
+    )
+    saved = agent.update(candidates)
+
+    assert llm.calls == 1
+    assert len(saved) == 1
+    assert "喜欢看新闻" in saved[0].content
+    assert "AI 新闻" in saved[0].content
+    assert "今天最火" not in saved[0].content
 
 
 def test_memory_validate_rejects_transient_or_sensitive_content(tmp_path):
@@ -57,6 +125,24 @@ def test_memory_extract_validate_update_and_retrieve(tmp_path):
     assert "简洁" in saved[0].content
     assert retrieved
     assert retrieved[0].usage_count == 1
+
+
+def test_memory_extracts_preferences_from_mixed_request(tmp_path):
+    store = SQLiteMemoryStore(tmp_path / "memory.sqlite3")
+    agent = MemoryAgent(store)
+
+    candidates = agent.extract(
+        "我喜欢跑步打游戏，喜欢旅游，你可以给我推荐几个避暑的旅游胜地吗",
+        "可以。",
+    )
+    saved = agent.update(candidates)
+
+    assert len(saved) == 1
+    assert saved[0].type == "preference"
+    assert "跑步" in saved[0].content
+    assert "游戏" in saved[0].content
+    assert "旅游" in saved[0].content
+    assert "推荐" not in saved[0].content
 
 
 def test_memory_update_ignores_non_worth_saving_query(tmp_path):

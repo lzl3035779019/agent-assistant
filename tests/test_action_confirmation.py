@@ -1,4 +1,5 @@
 from pmaa.skills.confirmation import confirm_pending_action
+import pmaa.skills.executors as executors_module
 from pmaa.skills.executors import create_default_executor_registry
 
 
@@ -10,6 +11,25 @@ PENDING_CONFIRMATION = {
     "permission_level": "network",
     "requires_confirmation": True,
     "plan": {"url": "https://example.com"},
+    "rollback": {"status": "not_started"},
+}
+
+BROWSER_TASK_CONFIRMATION = {
+    "status": "confirmation_required",
+    "tool_name": "skill:agent_browser",
+    "skill_id": "agent_browser",
+    "action": "browser.task",
+    "permission_level": "network",
+    "requires_confirmation": True,
+    "plan": {
+        "goal": "打开示例网站并截图",
+        "start_url": "https://example.com",
+        "steps": ["打开网页", "截图"],
+        "command_plan": [
+            "agent-browser open https://example.com",
+            "agent-browser screenshot",
+        ],
+    },
     "rollback": {"status": "not_started"},
 }
 
@@ -42,3 +62,103 @@ def test_confirm_pending_action_records_user_rejection():
     assert result["status"] == "rejected_by_user"
     assert result["action"] == "browser.open_url"
     assert result["execution"]["status"] == "cancelled"
+
+
+def test_confirm_pending_action_executes_approved_browser_task_commands():
+    commands: list[list[str]] = []
+    executor_registry = create_default_executor_registry(
+        command_exists=lambda command: command == "agent-browser",
+        command_runner=lambda command, timeout: commands.append(command) or (0, "ok", ""),
+    )
+
+    result = confirm_pending_action(
+        BROWSER_TASK_CONFIRMATION,
+        approved=True,
+        executor_registry=executor_registry,
+    )
+
+    assert result["approved"] is True
+    assert result["status"] == "executed"
+    assert result["action"] == "browser.task"
+    assert result["execution"]["status"] == "executed"
+    assert commands == [
+        ["agent-browser", "open", "https://example.com"],
+        ["agent-browser", "screenshot"],
+    ]
+
+
+def test_confirm_pending_action_reports_missing_agent_browser_runtime():
+    executor_registry = create_default_executor_registry(
+        command_exists=lambda command: False,
+    )
+
+    result = confirm_pending_action(
+        BROWSER_TASK_CONFIRMATION,
+        approved=True,
+        executor_registry=executor_registry,
+    )
+
+    assert result["approved"] is True
+    assert result["status"] == "failed"
+    assert result["execution"]["status"] == "missing_runtime"
+
+
+def test_confirm_pending_action_reports_browser_task_runner_exception():
+    executor_registry = create_default_executor_registry(
+        command_exists=lambda command: True,
+        command_runner=lambda command, timeout: (_ for _ in ()).throw(
+            FileNotFoundError("agent-browser")
+        ),
+    )
+
+    result = confirm_pending_action(
+        BROWSER_TASK_CONFIRMATION,
+        approved=True,
+        executor_registry=executor_registry,
+    )
+
+    assert result["approved"] is True
+    assert result["status"] == "failed"
+    assert result["execution"]["status"] == "failed"
+    assert "agent-browser" in result["execution"]["reason"]
+
+
+def test_browser_task_default_runner_resolves_windows_command_shim(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        executors_module.shutil,
+        "which",
+        lambda command: f"C:/Users/lzl/AppData/Roaming/npm/{command}.CMD",
+    )
+    monkeypatch.setattr(executors_module, "_build_command_env", lambda: {})
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["env"] = kwargs["env"]
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(executors_module.subprocess, "run", fake_run)
+
+    returncode, stdout, stderr = executors_module._run_command(
+        ["agent-browser", "open", "https://example.com"],
+        10,
+    )
+
+    assert returncode == 0
+    assert stdout == "ok"
+    assert stderr == ""
+    assert captured["args"] == [
+        "C:/Users/lzl/AppData/Roaming/npm/agent-browser.CMD",
+        "open",
+        "https://example.com",
+    ]
+    env = captured["env"]
+    assert env["AGENT_BROWSER_HEADED"] == "true"
+    assert env["AGENT_BROWSER_NAMESPACE"] == "pmaa-visible"

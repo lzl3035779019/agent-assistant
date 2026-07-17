@@ -1,7 +1,16 @@
 from typing import Any
 
+from pmaa.agents.memory import MemoryAgent
 from pmaa.llm.client import LLMMessage
-from pmaa.workflow.graph import build_workflow_graph, run_workflow
+from pmaa.schemas.task import Source
+from pmaa.storage.memory_store import SQLiteMemoryStore
+from pmaa.tools.registry import ToolRegistry
+from pmaa.workflow.graph import (
+    _extract_url_to_open,
+    _tool_input_for_direct_call,
+    build_workflow_graph,
+    run_workflow,
+)
 
 
 class RecordingWorkflowLLMClient:
@@ -44,6 +53,29 @@ class RecordingWorkflowLLMClient:
         }
 
 
+class StubMemoryConsolidationLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete_text(self, messages: list[LLMMessage]) -> str:
+        return ""
+
+    def complete_json(self, messages: list[LLMMessage]) -> dict[str, Any]:
+        self.calls += 1
+        return {
+            "candidates": [
+                {
+                    "type": "preference",
+                    "content": "用户喜欢看新闻，尤其关注 AI 新闻。",
+                    "source": "user",
+                    "confidence": 0.92,
+                    "should_save": True,
+                    "reason": "稳定兴趣偏好。",
+                }
+            ]
+        }
+
+
 def test_workflow_graph_is_langgraph_state_graph():
     graph = build_workflow_graph()
 
@@ -76,6 +108,166 @@ def test_workflow_returns_answer_sources_and_events():
         "reflection",
         "supervisor",
     ]
+
+
+def test_extract_url_to_open_prefers_product_official_site_over_baidu_homepage():
+    query = "\u6253\u5f00\u767e\u5ea6\u6587\u5fc3\u4e00\u8a00\u5927\u6a21\u578b\u7684\u5b98\u7f51"
+
+    assert _extract_url_to_open(query) == "https://yiyan.baidu.com"
+
+
+def test_browser_tool_input_searches_official_site_when_url_is_missing():
+    registry = ToolRegistry()
+    search_queries: list[str] = []
+
+    def fake_search(query: str) -> list[Source]:
+        search_queries.append(query)
+        return [
+            Source(
+                title="Cursor Docs",
+                url="https://docs.cursor.com",
+                snippet="Documentation for Cursor.",
+            ),
+            Source(
+                title="Cursor - Official Site",
+                url="https://www.cursor.com",
+                snippet="The official website for Cursor.",
+            ),
+        ]
+
+    registry.register("search", fake_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "open Cursor website",
+        registry,
+    )
+
+    assert search_queries == []
+    assert result == {
+        "action": "browser.open_url",
+        "args": {"url": "https://cursor.com"},
+    }
+
+
+def test_browser_tool_input_normalizes_search_result_to_site_homepage_for_official_site():
+    registry = ToolRegistry()
+
+    def fake_search(query: str) -> list[Source]:
+        return [
+            Source(
+                title="Vercel Blog",
+                url="https://vercel.com/blog",
+                snippet="Updates from Vercel official website.",
+            )
+        ]
+
+    registry.register("search", fake_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "open Vercel official website",
+        registry,
+    )
+
+    assert result == {
+        "action": "browser.open_url",
+        "args": {"url": "https://vercel.com"},
+    }
+
+
+def test_browser_tool_input_does_not_search_when_url_is_present():
+    registry = ToolRegistry()
+
+    def fail_search(query: str) -> list[Source]:
+        raise AssertionError("search should not be called for explicit URLs")
+
+    registry.register("search", fail_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "open https://openai.com",
+        registry,
+    )
+
+    assert result == {
+        "action": "browser.open_url",
+        "args": {"url": "https://openai.com"},
+    }
+
+def test_browser_tool_input_builds_task_for_generic_browser_tasks():
+    registry = ToolRegistry()
+    search_queries: list[str] = []
+
+    def fake_search(query: str) -> list[Source]:
+        search_queries.append(query)
+        return [
+            Source(
+                title="Browser Official Site",
+                url="https://browser.example.com",
+                snippet="Official website.",
+            )
+        ]
+
+    registry.register("search", fake_search)
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "Open the browser and inspect the page",
+        registry,
+    )
+
+    assert search_queries == []
+    assert result == {
+        "action": "browser.task",
+        "args": {
+            "goal": "Open the browser and inspect the page",
+            "steps": ["检查页面"],
+        },
+    }
+
+
+def test_browser_tool_input_builds_task_with_screenshot_step():
+    registry = ToolRegistry()
+
+    result = _tool_input_for_direct_call(
+        "skill:agent_browser",
+        "打开 https://example.com 并截图",
+        registry,
+    )
+
+    assert result == {
+        "action": "browser.task",
+        "args": {
+            "goal": "打开 https://example.com 并截图",
+            "start_url": "https://example.com",
+            "steps": ["打开网页", "截图"],
+        },
+    }
+
+
+def test_workflow_consolidates_memory_after_final_answer(tmp_path):
+    store = SQLiteMemoryStore(tmp_path / "memory.sqlite3")
+    llm = StubMemoryConsolidationLLM()
+    memory_agent = MemoryAgent(store, llm_client=llm)
+
+    result = run_workflow(
+        "我喜欢看新闻，搜索今天最火的 AI 新闻",
+        memory_agent=memory_agent,
+        enable_memory=True,
+    )
+
+    saved = store.list_all()
+    memory_event = next(
+        event
+        for event in result.events
+        if event.agent == "memory" and event.event_type == "updated"
+    )
+
+    assert llm.calls == 1
+    assert len(saved) == 1
+    assert "喜欢看新闻" in saved[0].content
+    assert memory_event.output["saved_count"] == 1
 
 
 def test_workflow_passes_conversation_context_to_llm_agents():

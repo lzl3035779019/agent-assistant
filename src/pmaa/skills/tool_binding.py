@@ -48,7 +48,7 @@ class SkillToolBindingService:
         self,
         command_exists: Callable[[str], bool] | None = None,
         runner: Callable[[list[str], int], tuple[int, str, str]] | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = 60,
         audit_log: SkillActionLog | None = None,
         action_registry: ActionAdapterRegistry | None = None,
     ) -> None:

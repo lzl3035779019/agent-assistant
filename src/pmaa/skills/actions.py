@@ -88,6 +88,47 @@ def create_default_action_registry() -> ActionAdapterRegistry:
         ),
         _browser_open_url,
     )
+    registry.register(
+        SkillActionAdapter(
+            action="browser.task",
+            description="Prepare a multi-step agent-browser automation task.",
+            permission_level="network",
+            requires_confirmation=True,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "The browser automation goal.",
+                    },
+                    "start_url": {
+                        "type": "string",
+                        "description": "Optional http or https URL where the task should start.",
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "High-level browser steps inferred from the user request.",
+                    },
+                },
+                "required": ["goal"],
+            },
+            skill_terms=[
+                "browser",
+                "web",
+                "page",
+                "url",
+                "automation",
+                "screenshot",
+                "click",
+                "fill",
+                "scrape",
+                "inspect",
+                "test",
+            ],
+        ),
+        _browser_task,
+    )
     return registry
 
 
@@ -126,3 +167,89 @@ def _browser_open_url(request: SkillActionRequest) -> dict[str, Any]:
             "reason": "Dry-run plan only; no browser action executed.",
         },
     }
+
+
+def _browser_task(request: SkillActionRequest) -> dict[str, Any]:
+    goal = str(request.args.get("goal", "")).strip()
+    start_url = str(request.args.get("start_url", "") or "").strip()
+    if not goal:
+        return {
+            "success": False,
+            "status": "rejected",
+            "action": "browser.task",
+            "permission_level": "network",
+            "requires_confirmation": True,
+            "confirmed": request.confirmed,
+            "dry_run": True,
+            "error": "Browser task goal is required.",
+            "rollback": {
+                "status": "not_started",
+                "reason": "Invalid browser task rejected before execution.",
+            },
+        }
+    if start_url:
+        parsed = urlparse(start_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return {
+                "success": False,
+                "status": "rejected",
+                "action": "browser.task",
+                "permission_level": "network",
+                "requires_confirmation": True,
+                "confirmed": request.confirmed,
+                "dry_run": True,
+                "error": "Only http and https start URLs are allowed.",
+                "rollback": {
+                    "status": "not_started",
+                    "reason": "Invalid browser task rejected before execution.",
+                },
+            }
+    steps = request.args.get("steps", [])
+    if not isinstance(steps, list):
+        steps = []
+    normalized_steps = [str(step).strip() for step in steps if str(step).strip()]
+    command_plan = _build_browser_task_command_plan(goal, start_url, normalized_steps)
+    return {
+        "success": False,
+        "status": "confirmation_required",
+        "action": "browser.task",
+        "permission_level": "network",
+        "requires_confirmation": True,
+        "confirmed": request.confirmed,
+        "dry_run": True,
+        "plan": {
+            "operation": "browser_task",
+            "goal": goal,
+            "start_url": start_url,
+            "steps": normalized_steps,
+            "command_plan": command_plan,
+        },
+        "rollback": {
+            "status": "not_started",
+            "reason": "Dry-run plan only; no browser action executed.",
+        },
+    }
+
+
+def _build_browser_task_command_plan(
+    goal: str,
+    start_url: str,
+    steps: list[str],
+) -> list[str]:
+    commands: list[str] = []
+    searchable = " ".join([goal, *steps]).lower()
+    if start_url:
+        commands.append(f"agent-browser open {start_url}")
+    if any(marker in searchable for marker in ("截图", "screenshot", "capture")):
+        commands.append("agent-browser screenshot")
+    if any(marker in searchable for marker in ("抽取", "提取", "读取", "read", "extract", "scrape")):
+        commands.append("agent-browser read")
+    if any(marker in searchable for marker in ("点击", "click")):
+        commands.append("agent-browser snapshot -i")
+        commands.append("agent-browser click <ref>")
+    if any(marker in searchable for marker in ("填写", "填表", "fill", "form")):
+        commands.append("agent-browser snapshot -i")
+        commands.append("agent-browser fill <ref> <value>")
+    if not commands:
+        commands.append("agent-browser snapshot -i")
+    return commands

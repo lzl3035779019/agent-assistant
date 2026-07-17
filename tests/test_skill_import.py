@@ -114,7 +114,7 @@ def test_import_skill_url_downloads_and_imports(monkeypatch, tmp_path):
 
     def fake_get(url: str, timeout: float):
         assert url == "https://example.com/SKILL.md"
-        assert timeout == 20
+        assert timeout == 60
         return FakeResponse()
 
     monkeypatch.setattr("pmaa.skills.registry.httpx.get", fake_get)

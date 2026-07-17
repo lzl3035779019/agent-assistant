@@ -6,6 +6,7 @@ from datetime import datetime
 from html import escape
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # Streamlit hot-reloads the page module but may retain imported helper modules.
 # Reload the tightly coupled Wiki modules together so a new page call never
@@ -25,6 +26,7 @@ from pmaa.skills.runtime import SkillRuntimeInstaller, SkillRuntimeInspector
 from pmaa.skills.tool_binding import SkillToolBindingService
 from pmaa.ui.action_audit import append_action_audit, build_action_audit_markdown
 from pmaa.ui.chat_render import (
+    build_policy_card_markdown,
     build_thought_text,
     normalize_markdown_content,
     render_user_message,
@@ -34,12 +36,14 @@ from pmaa.ui.conversation_context import build_conversation_context
 from pmaa.ui.export import build_bulk_markdown_export
 from pmaa.ui.message_state import message_has_pending_confirmation
 from pmaa.ui.view_model import build_task_view
-from pmaa.ui.wiki_render import build_wiki_graph_html
+from pmaa.ui.wiki_render import DEFAULT_GRAPH_VIEWPORT_HEIGHT, build_wiki_graph_html
+from pmaa.tools.email_tool import EmailTool
 from pmaa.wiki.jobs import (
     get_wiki_import_job,
     start_gbrain_skill_enrichment_job,
     start_semantic_knowledge_model_job,
     start_wiki_commit_job,
+    start_wiki_delete_source_job,
     start_wiki_preview_job,
 )
 from pmaa.wiki.importer import (
@@ -177,6 +181,17 @@ st.markdown(
         font-size: 15px;
         line-height: 1.75;
     }
+    .email-body-box {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffefa;
+        color: #2f2b25;
+        padding: 14px 16px;
+        min-height: 220px;
+        white-space: pre-wrap;
+        line-height: 1.75;
+        font-size: 14px;
+    }
     .question-card {
         width: 100%;
         border-radius: 8px;
@@ -248,6 +263,29 @@ st.markdown(
         font-size: 13px;
         line-height: 1.65;
         font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+    .policy-card {
+        border: 1px solid #e7d8b8;
+        border-radius: 8px;
+        background: #fffdf8;
+        padding: 10px 12px;
+        margin-top: 10px;
+        margin-bottom: 10px;
+        color: #29251f;
+    }
+    .policy-card h4 {
+        margin: 0 0 8px 0;
+        color: #4c3d18;
+        font-size: 14px;
+    }
+    .policy-card ul {
+        margin: 0 0 0 18px;
+        padding: 0;
+    }
+    .policy-card li {
+        margin: 3px 0;
+        color: #2c2822;
+        font-size: 13px;
     }
     .readonly-box, .field-title { display: none !important; }
     div[class*="st-key-chat_input_bar"] {
@@ -767,6 +805,8 @@ if "wiki_preview" not in st.session_state:
     st.session_state.wiki_preview = None
 if "wiki_import_result" not in st.session_state:
     st.session_state.wiki_import_result = None
+if "wiki_delete_result" not in st.session_state:
+    st.session_state.wiki_delete_result = None
 if "wiki_error" not in st.session_state:
     st.session_state.wiki_error = ""
 if "wiki_import_job_id" not in st.session_state:
@@ -777,6 +817,30 @@ if "wiki_overview_highlights" not in st.session_state:
     st.session_state.wiki_overview_highlights = set()
 if "wiki_overview_refresh_needed" not in st.session_state:
     st.session_state.wiki_overview_refresh_needed = True
+if "email_last_result" not in st.session_state:
+    st.session_state.email_last_result = None
+if "email_pending_confirmation" not in st.session_state:
+    st.session_state.email_pending_confirmation = {}
+if "email_confirmation_result" not in st.session_state:
+    st.session_state.email_confirmation_result = None
+if "email_error" not in st.session_state:
+    st.session_state.email_error = ""
+if "email_to" not in st.session_state:
+    st.session_state.email_to = ""
+if "email_subject" not in st.session_state:
+    st.session_state.email_subject = ""
+if "email_body" not in st.session_state:
+    st.session_state.email_body = ""
+if "email_selected_message_id" not in st.session_state:
+    st.session_state.email_selected_message_id = ""
+if "email_selected_message_detail" not in st.session_state:
+    st.session_state.email_selected_message_detail = None
+if "email_unread_refresh_nonce" not in st.session_state:
+    st.session_state.email_unread_refresh_nonce = 0
+if "email_unread_last_count" not in st.session_state:
+    st.session_state.email_unread_last_count = None
+if "email_last_list_filter" not in st.session_state:
+    st.session_state.email_last_list_filter = None
 
 
 def build_bulk_export_filename() -> str:
@@ -827,6 +891,17 @@ def overlay_wiki_graph(base: WikiGraph | None, preview: WikiGraph | None) -> Wik
     return WikiGraph(nodes=list(nodes.values()), edges=list(edges.values()))
 
 
+def render_wiki_graph(
+    graph: WikiGraph,
+    highlighted_node_ids: set[str] | None = None,
+) -> None:
+    components.html(
+        build_wiki_graph_html(graph, highlighted_node_ids=highlighted_node_ids),
+        height=DEFAULT_GRAPH_VIEWPORT_HEIGHT + 170,
+        scrolling=False,
+    )
+
+
 def sync_wiki_import_job():
     """Bring a completed process-wide Wiki job back into this UI session."""
     job = get_wiki_import_job(st.session_state.get("wiki_import_job_id"))
@@ -846,7 +921,16 @@ def sync_wiki_import_job():
         st.session_state.wiki_import_result = None
     elif job.kind == "commit":
         st.session_state.wiki_import_result = job.result
+        st.session_state.wiki_delete_result = None
         st.session_state.wiki_overview_highlights = set(job.result.written_slugs)
+        st.session_state.wiki_overview_refresh_needed = True
+    elif job.kind == "delete":
+        st.session_state.wiki_delete_result = job.result
+        st.session_state.wiki_import_result = None
+        st.session_state.wiki_skill_result = None
+        st.session_state.wiki_semantic_result = None
+        st.session_state.wiki_preview = None
+        st.session_state.wiki_overview_highlights = set()
         st.session_state.wiki_overview_refresh_needed = True
     elif job.kind == "enrich":
         st.session_state.wiki_skill_result = job.result
@@ -875,6 +959,7 @@ def render_wiki_job_watcher() -> None:
         action = {
             "preview": "准备原生来源导入",
             "commit": "写入 GBrain 原生来源页",
+            "delete": "删除 GBrain 来源页及相关知识",
             "enrich": "按 GBrain 官方 Skill 整理来源页",
             "semantic_model": "建立语义知识模型",
         }[job.kind]
@@ -882,16 +967,6 @@ def render_wiki_job_watcher() -> None:
         return
     sync_wiki_import_job()
     st.rerun(scope="app")
-
-
-def build_thought_text(view: dict | None) -> str:
-    if view is None:
-        return "等待运行工作流。"
-    lines: list[str] = []
-    for index, event in enumerate(view["events"], start=1):
-        payload = json.dumps(event["output"], ensure_ascii=False, indent=2)
-        lines.append(f"[{index}] {event['label']} - {event['event_type']}\n{payload}")
-    return "\n\n".join(lines)
 
 
 def resolve_pending_confirmation(approved: bool) -> None:
@@ -987,6 +1062,7 @@ def build_raw_context(view: dict | None, task_input: str) -> str:
 AGENT_LABELS = {
     "supervisor": "Supervisor",
     "knowledge": "Knowledge",
+    "email": "Email",
     "planner": "Planner",
     "search": "Search",
     "tool": "Tool",
@@ -1027,6 +1103,362 @@ def sse_agent_event_to_view_event(event_payload: dict) -> dict:
         "output": event.get("output", {}),
         "timestamp": event.get("timestamp", ""),
     }
+
+
+def call_email_tool(payload: dict) -> dict:
+    try:
+        result = EmailTool().__call__(payload)
+    except Exception as exc:
+        st.session_state.email_error = str(exc)
+        return {}
+    st.session_state.email_error = ""
+    action = result.get("action", payload.get("action", ""))
+    if action == "list_recent":
+        st.session_state.email_last_result = result
+        st.session_state.email_selected_message_detail = None
+        refresh_email_unread_badge()
+    elif action == "get_message":
+        st.session_state.email_selected_message_detail = result
+        if result.get("message") and payload.get("mark_read"):
+            sync_read_message_in_email_list(str(result["message"].get("message_id", "")))
+            refresh_email_unread_badge()
+            if "email_list_limit" in st.session_state and "email_unread_only_filter" in st.session_state:
+                st.session_state.email_last_list_filter = (
+                    int(st.session_state.email_list_limit),
+                    bool(st.session_state.email_unread_only_filter),
+                )
+    if result.get("status") == "confirmation_required":
+        st.session_state.email_pending_confirmation = result
+    return result
+
+
+def sync_read_message_in_email_list(message_id: str) -> None:
+    if not message_id:
+        return
+    last_result = st.session_state.get("email_last_result")
+    if not last_result:
+        return
+    messages = last_result.get("messages") or []
+    next_messages = []
+    for message in messages:
+        if str(message.get("message_id", "")) == message_id:
+            message = {**message, "unread": False}
+        next_messages.append(message)
+    st.session_state.email_last_result = {**last_result, "messages": next_messages}
+
+
+def refresh_email_unread_badge() -> None:
+    st.session_state.email_unread_refresh_nonce += 1
+    get_email_unread_count.clear()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_email_unread_count(refresh_nonce: int = 0) -> tuple[int, str]:
+    current_settings = load_settings()
+    if not current_settings.qq_email_address or not current_settings.qq_email_auth_code:
+        return 0, "missing_config"
+    try:
+        result = EmailTool().__call__({"action": "count_today_unread"})
+    except Exception as exc:
+        return 0, str(exc)
+    if result.get("status") == "configuration_error":
+        return 0, result.get("answer", "missing_config")
+    return int(result.get("unread_count") or 0), ""
+
+
+def render_email_nav_badge_style(count: int) -> None:
+    if count <= 0:
+        st.markdown(
+            """
+            <style>
+            .st-key-nav_email button::after {
+                content: none !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+    label = "99+" if count > 99 else str(count)
+    st.markdown(
+        f"""
+        <style>
+        .st-key-nav_email button {{
+            position: relative;
+            padding-right: 48px !important;
+        }}
+        .st-key-nav_email button::after {{
+            content: "{label}";
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            min-width: 22px;
+            height: 22px;
+            padding: 0 7px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            background: #e5484d;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 850;
+            line-height: 22px;
+            box-shadow: 0 2px 8px rgba(229, 72, 77, .28);
+            box-sizing: border-box;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+@st.fragment(run_every="60s")
+def render_email_nav_button(is_running: bool) -> None:
+    count, error = get_email_unread_count(st.session_state.email_unread_refresh_nonce)
+    last_count = st.session_state.get("email_unread_last_count")
+    if count > 0 and (last_count is None or count > last_count):
+        st.toast(f"你有 {count} 封未读邮件。")
+    st.session_state.email_unread_last_count = count
+    render_email_nav_badge_style(count)
+    if st.button("邮件助手  QQ Mail", key="nav_email", use_container_width=True, disabled=is_running):
+        st.session_state.active_page = "email"
+        st.rerun(scope="app")
+    if error and error != "missing_config":
+        st.caption("邮箱未读检查失败")
+
+
+def resolve_email_pending_confirmation(approved: bool) -> None:
+    pending_confirmation = st.session_state.get("email_pending_confirmation") or {}
+    if not pending_confirmation:
+        return
+    confirmation_result = confirm_action_via_api(
+        pending_confirmation,
+        approved=approved,
+    )
+    st.session_state.email_confirmation_result = confirmation_result
+    st.session_state.email_pending_confirmation = {}
+
+
+def render_email_messages(result: dict | None) -> None:
+    if not result:
+        st.info("点击上方按钮读取最近邮件。")
+        return
+    if result.get("status") == "configuration_error":
+        st.error(result.get("answer", "邮箱配置不完整。"))
+        return
+    messages = result.get("messages") or []
+    if not messages:
+        st.markdown(result.get("answer", "暂无邮件。"))
+        return
+    for index, message in enumerate(messages, start=1):
+        with st.container(border=True):
+            unread_label = "未读" if message.get("unread") else "已读"
+            st.markdown(f"**{index}. {message.get('subject') or '无主题'}** · `{unread_label}`")
+            st.caption(f"发件人：{message.get('from_addr', '')}")
+            st.caption(f"时间：{message.get('date', '')}")
+            st.write(message.get("snippet", ""))
+            message_id = str(message.get("message_id", ""))
+            select_col, detail_col = st.columns(2)
+            with select_col:
+                if st.button("选择用于回复", key=f"email_select_{message_id}", use_container_width=True):
+                    st.session_state.email_selected_message_id = message_id
+                    st.rerun()
+            with detail_col:
+                if st.button("查看全文", key=f"email_detail_{message_id}", use_container_width=True):
+                    st.session_state.email_selected_message_id = message_id
+                    call_email_tool(
+                        {
+                            "action": "get_message",
+                            "message_id": st.session_state.email_selected_message_id,
+                            "mark_read": True,
+                        }
+                    )
+                    st.rerun()
+            detail_result = st.session_state.get("email_selected_message_detail")
+            selected_id = st.session_state.get("email_selected_message_id")
+            if selected_id == message_id and detail_result:
+                detail_message = detail_result.get("message")
+                with st.expander("邮件全文", expanded=True):
+                    if detail_message:
+                        st.markdown(f"**{detail_message.get('subject') or '无主题'}**")
+                        st.caption(f"发件人：{detail_message.get('from_addr', '')}")
+                        st.caption(f"时间：{detail_message.get('date', '')}")
+                        body_text = detail_message.get("body") or detail_message.get("snippet") or ""
+                        st.markdown(
+                            f'<div class="email-body-box">{escape(body_text)}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.warning(detail_result.get("answer", "没有读取到这封邮件的全文。"))
+
+
+def render_email_pending_confirmation() -> None:
+    pending_confirmation = st.session_state.get("email_pending_confirmation") or {}
+    if not pending_confirmation:
+        return
+    plan = pending_confirmation.get("plan", {})
+    with st.container(border=True):
+        st.markdown("### 等待发送确认")
+        st.warning("邮件发送属于不可撤回动作，只有点击允许后才会真正通过 SMTP 发出。")
+        st.markdown(f"**收件人**：`{plan.get('to', '')}`")
+        st.markdown(f"**主题**：{plan.get('subject', '')}")
+        st.text_area(
+            "待发送正文",
+            value=plan.get("body", ""),
+            height=180,
+            disabled=True,
+            key="email_pending_body_preview",
+        )
+        approve_col, reject_col = st.columns(2)
+        with approve_col:
+            if st.button("允许发送", type="primary", use_container_width=True, key="email_approve_send"):
+                resolve_email_pending_confirmation(True)
+                st.rerun()
+        with reject_col:
+            if st.button("拒绝发送", use_container_width=True, key="email_reject_send"):
+                resolve_email_pending_confirmation(False)
+                st.rerun()
+
+
+def render_email_assistant_page() -> None:
+    current_settings = load_settings()
+    configured = bool(current_settings.qq_email_address and current_settings.qq_email_auth_code)
+    st.markdown(
+        """
+        <div class="chat-header">
+          <div class="chat-title">邮件助手 <span class="status-dot"></span></div>
+          <div class="muted">QQ Mail · IMAP read · SMTP send approval</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if configured:
+        st.success(f"已配置邮箱：{current_settings.qq_email_address}")
+    else:
+        st.warning("邮箱尚未配置。请在 .env 中填写 QQ_EMAIL_ADDRESS 和 QQ_EMAIL_AUTH_CODE 后重启服务。")
+
+    with st.container(border=True):
+        st.markdown("### 收件箱")
+        limit_col, unread_col, action_col = st.columns([0.22, 0.22, 0.56])
+        with limit_col:
+            limit = st.number_input(
+                "读取数量",
+                min_value=1,
+                max_value=20,
+                value=5,
+                step=1,
+                key="email_list_limit",
+            )
+        with unread_col:
+            unread_only = st.toggle("只看未读", value=False, key="email_unread_only_filter")
+        current_filter = (int(limit), bool(unread_only))
+        if (
+            st.session_state.get("email_last_result") is not None
+            and st.session_state.get("email_last_list_filter") != current_filter
+        ):
+            call_email_tool(
+                {
+                    "action": "list_recent",
+                    "limit": int(limit),
+                    "unread_only": unread_only,
+                }
+            )
+            st.session_state.email_last_list_filter = current_filter
+        with action_col:
+            st.write("")
+            if st.button("读取最近邮件", use_container_width=True, disabled=not configured):
+                call_email_tool(
+                    {
+                        "action": "list_recent",
+                        "limit": int(limit),
+                        "unread_only": unread_only,
+                    }
+                )
+                st.session_state.email_last_list_filter = current_filter
+                st.rerun()
+        render_email_messages(st.session_state.get("email_last_result"))
+
+    with st.container(border=True):
+        st.markdown("### 回复 / 写邮件")
+        st.caption("页面只生成草稿或待确认发送动作；真正发送必须二次确认。")
+        messages = (st.session_state.get("email_last_result") or {}).get("messages") or []
+        message_options = {
+            f"{index}. {message.get('subject') or '无主题'} - {message.get('from_addr', '')}": str(message.get("message_id", ""))
+            for index, message in enumerate(messages, start=1)
+        }
+        selected_label = None
+        if message_options:
+            selected_label = st.selectbox(
+                "选择要回复的邮件",
+                options=list(message_options.keys()),
+                placeholder="请先选择邮件",
+                key="email_reply_source_label",
+            )
+        else:
+            st.info("请先读取收件箱，再选择要回复的邮件。")
+        if selected_label:
+            st.session_state.email_selected_message_id = message_options[selected_label]
+        draft_col, clear_col = st.columns([0.5, 0.5])
+        with draft_col:
+            selected_message_id = st.session_state.get("email_selected_message_id", "")
+            if st.button("基于选中邮件生成回复草稿", use_container_width=True, disabled=not configured or not selected_message_id):
+                result = call_email_tool({"action": "draft_reply", "message_id": selected_message_id})
+                draft = result.get("draft") if result else None
+                if draft:
+                    st.session_state.email_to = draft.get("to", "")
+                    st.session_state.email_subject = draft.get("subject", "")
+                    st.session_state.email_body = draft.get("body", "")
+                st.rerun()
+        with clear_col:
+            if st.button("清空草稿", use_container_width=True):
+                st.session_state.email_to = ""
+                st.session_state.email_subject = ""
+                st.session_state.email_body = ""
+                st.session_state.email_pending_confirmation = {}
+                st.session_state.email_confirmation_result = None
+                st.session_state.email_selected_message_id = ""
+                st.session_state.email_selected_message_detail = None
+                st.rerun()
+
+        st.text_input("收件人", key="email_to", placeholder="name@example.com")
+        st.text_input("主题", key="email_subject", placeholder="请输入邮件主题")
+        st.text_area("正文", key="email_body", height=180, placeholder="请输入邮件正文")
+        if st.button("生成发送确认", type="primary", use_container_width=True, disabled=not configured):
+            call_email_tool(
+                {
+                    "action": "prepare_send",
+                    "to": st.session_state.email_to,
+                    "subject": st.session_state.email_subject,
+                    "body": st.session_state.email_body,
+                }
+            )
+            st.rerun()
+
+    render_email_pending_confirmation()
+    if st.session_state.get("email_confirmation_result"):
+        with st.container(border=True):
+            st.markdown("### 动作审计")
+            st.markdown(build_action_audit_markdown(st.session_state.email_confirmation_result))
+    if st.session_state.get("email_error"):
+        st.error(st.session_state.email_error)
+
+
+def render_email_trace_panel() -> None:
+    current_settings = load_settings()
+    st.markdown("### Email Trace")
+    st.metric("Config", "Ready" if current_settings.qq_email_address and current_settings.qq_email_auth_code else "Missing")
+    st.caption("授权码不会在页面中展示。")
+    if st.session_state.get("email_pending_confirmation"):
+        st.markdown("#### Pending Confirmation")
+        st.json(st.session_state.email_pending_confirmation)
+    if st.session_state.get("email_confirmation_result"):
+        st.markdown("#### Last Action")
+        st.json(st.session_state.email_confirmation_result)
+    if st.session_state.get("email_last_result"):
+        st.markdown("#### Last Result")
+        st.json(st.session_state.email_last_result)
 
 
 def render_memory_system_page() -> None:
@@ -1172,6 +1604,34 @@ def render_skill_management_page() -> None:
                 ):
                     SKILL_REGISTRY.set_enabled(skill.skill_id, not skill.enabled)
                     st.rerun()
+                if st.button(
+                    "删除",
+                    key=f"delete_skill_{skill.skill_id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        SKILL_REGISTRY.delete(skill.skill_id)
+                        st.success(f"已删除 Skill：{skill.name}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"删除失败：{exc}")
+                if runtime_report.install_commands:
+                    if st.button(
+                        "安装/修复运行时",
+                        key=f"quick_install_skill_{skill.skill_id}",
+                        use_container_width=True,
+                    ):
+                        install_result = SKILL_RUNTIME_INSTALLER.install(skill, 0)
+                        if install_result.success:
+                            st.success("运行时安装命令执行成功。")
+                        else:
+                            st.error(
+                                f"运行时安装命令执行失败，退出码：{install_result.returncode}"
+                            )
+                        if install_result.stdout:
+                            st.code(install_result.stdout, language="text")
+                        if install_result.stderr:
+                            st.code(install_result.stderr, language="text")
             with st.expander("预览 SKILL.md", expanded=False):
                 st.markdown(skill.body or "暂无正文")
             with st.expander("Runtime 检查", expanded=False):
@@ -1281,6 +1741,7 @@ def render_wiki_knowledge_page() -> None:
                     st.session_state.wiki_import_job_id = job.job_id
                     st.session_state.wiki_preview = None
                     st.session_state.wiki_import_result = None
+                    st.session_state.wiki_delete_result = None
                     st.session_state.wiki_skill_result = None
                     st.session_state.wiki_semantic_result = None
                     st.session_state.wiki_overview_highlights = set()
@@ -1299,6 +1760,7 @@ def render_wiki_knowledge_page() -> None:
                     job = start_wiki_commit_job(preview.import_id)
                     st.session_state.wiki_import_job_id = job.job_id
                     st.session_state.wiki_import_result = None
+                    st.session_state.wiki_delete_result = None
                     st.session_state.wiki_skill_result = None
                     st.session_state.wiki_semantic_result = None
                     st.session_state.wiki_error = ""
@@ -1315,6 +1777,11 @@ def render_wiki_knowledge_page() -> None:
                     use_container_width=True,
                     key="wiki_enrich_source",
                     disabled=wiki_job_active,
+                    help=(
+                        "用于媒体/文章类来源页：按 GBrain 官方 media-ingest 与 "
+                        "article-enrichment Skill 提炼摘要、金句、人物和公司，并写回 GBrain。"
+                        "技术文档、面试题、方法论资料通常应使用下面的“建立语义知识模型”。"
+                    ),
                 ):
                     job = start_gbrain_skill_enrichment_job(result.root_slug)
                     st.session_state.wiki_import_job_id = job.job_id
@@ -1329,6 +1796,7 @@ def render_wiki_knowledge_page() -> None:
                 ):
                     job = start_semantic_knowledge_model_job(result.root_slug)
                     st.session_state.wiki_import_job_id = job.job_id
+                    st.session_state.wiki_delete_result = None
                     st.session_state.wiki_error = ""
                     st.rerun()
             if st.session_state.get("wiki_skill_result") is not None:
@@ -1348,6 +1816,14 @@ def render_wiki_knowledge_page() -> None:
                 )
                 if result.pages:
                     st.code("\n".join(result.pages), language="text")
+            if st.session_state.get("wiki_delete_result") is not None:
+                result = st.session_state.wiki_delete_result
+                st.success(
+                    f"已删除来源页及相关知识：{result.source_slug}；"
+                    f"删除 {len(result.deleted_slugs)} 个页面、{result.deleted_edges} 条关系。"
+                )
+                if result.deleted_slugs:
+                    st.code("\n".join(result.deleted_slugs), language="text")
 
             # The page may be refreshed or reopened after a successful import.
             # Keep semantic modelling available for all persisted source pages,
@@ -1374,6 +1850,24 @@ def render_wiki_knowledge_page() -> None:
                 ):
                     job = start_semantic_knowledge_model_job(selected_source)
                     st.session_state.wiki_import_job_id = job.job_id
+                    st.session_state.wiki_delete_result = None
+                    st.session_state.wiki_error = ""
+                    st.rerun()
+                confirm_delete_source = st.checkbox(
+                    "确认删除所选来源页及由它建立的相关知识",
+                    key="wiki_confirm_delete_source",
+                    disabled=wiki_job_active,
+                )
+                if st.button(
+                    "删除所选来源页及相关知识",
+                    use_container_width=True,
+                    key="wiki_delete_existing_source",
+                    disabled=wiki_job_active or not confirm_delete_source,
+                    help="删除会调用 GBrain 的级联删除工具，完成后刷新知识库全景。",
+                ):
+                    job = start_wiki_delete_source_job(selected_source)
+                    st.session_state.wiki_import_job_id = job.job_id
+                    st.session_state.wiki_delete_result = None
                     st.session_state.wiki_error = ""
                     st.rerun()
 
@@ -1405,7 +1899,7 @@ def render_wiki_knowledge_page() -> None:
         if st.button("刷新知识库全景", key="wiki_overview_refresh", use_container_width=True):
             refresh_wiki_overview()
             st.rerun()
-        st.markdown(build_wiki_graph_html(display_graph, highlighted_node_ids=highlighted), unsafe_allow_html=True)
+        render_wiki_graph(display_graph, highlighted_node_ids=highlighted)
         if preview:
             st.info(f"本次原生导入：{preview.summary}" if preview.summary else "本次原生来源页将写入知识库。")
             st.caption(f"Import ID：`{preview.import_id}` · Root slug：`{preview.root_slug}`")
@@ -1433,7 +1927,7 @@ def render_wiki_knowledge_page() -> None:
                 st.session_state.wiki_error = str(exc)
     visualize_graph = st.session_state.get("wiki_visualize_graph")
     if visualize_graph is not None:
-        st.markdown(build_wiki_graph_html(visualize_graph), unsafe_allow_html=True)
+        render_wiki_graph(visualize_graph)
 
 
 def render_skill_import_section() -> None:
@@ -1521,6 +2015,10 @@ def render_assistant_message_native(message) -> None:
             return
         if message.view is not None:
             with st.expander("思考过程 / Agent 执行过程", expanded=False):
+                policy_card = build_policy_card_markdown(message.view)
+                if policy_card:
+                    with st.container(border=True):
+                        st.markdown(policy_card)
                 st.code(build_thought_text(message.view), language="text")
         with st.container(border=True):
             if message_has_pending_confirmation(message):
@@ -1652,6 +2150,7 @@ with left:
             if st.button("记忆系统  Memory System", key="nav_memory", use_container_width=True, disabled=is_running):
                 st.session_state.active_page = "memory"
                 st.rerun()
+            render_email_nav_button(is_running)
             if st.button("LLM Wiki 知识库", key="nav_wiki", use_container_width=True, disabled=is_running):
                 st.session_state.active_page = "wiki"
                 st.rerun()
@@ -1790,6 +2289,15 @@ if st.session_state.active_page == "memory":
             st.json(type_counts)
     st.stop()
 
+if st.session_state.active_page == "email":
+    with center:
+        with st.container(border=True):
+            render_email_assistant_page()
+    with right:
+        with st.container(border=True):
+            render_email_trace_panel()
+    st.stop()
+
 if st.session_state.active_page == "wiki":
     with center:
         with st.container(border=True):
@@ -1854,6 +2362,10 @@ with center:
                 live_view = build_live_view(live_events)
                 with thought_slot.container():
                     with st.expander("思考过程 / Agent 执行过程", expanded=True):
+                        policy_card = build_policy_card_markdown(live_view)
+                        if policy_card:
+                            with st.container(border=True):
+                                st.markdown(policy_card)
                         st.code("正在连接流式工作流...", language="text")
                 with answer_slot.container(border=True):
                     st.markdown("正在执行任务...")
@@ -1869,6 +2381,10 @@ with center:
                             live_view = build_live_view(live_events)
                             with thought_slot.container():
                                 with st.expander("思考过程 / Agent 执行过程", expanded=True):
+                                    policy_card = build_policy_card_markdown(live_view)
+                                    if policy_card:
+                                        with st.container(border=True):
+                                            st.markdown(policy_card)
                                     st.code(build_thought_text(live_view), language="text")
                         elif event_type == "workflow_completed":
                             workflow_result = WorkflowResult.model_validate(

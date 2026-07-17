@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 from typing import Any
 
 from pmaa.llm.client import LLMMessage
@@ -14,7 +14,7 @@ class SkillToolRoutingLLMClient:
 
     def complete_json(self, messages: list[LLMMessage]) -> dict[str, Any]:
         prompt_text = "\n".join(message.content for message in messages)
-        if "Evaluate" in prompt_text or "检查" in prompt_text:
+        if "Evaluate" in prompt_text:
             return {
                 "passed": True,
                 "issues": [],
@@ -54,8 +54,7 @@ Run `agent-browser skills get core`.
     registry = LocalSkillRegistry(tmp_path / "skills", tmp_path / "state.json")
 
     def fake_runner(command: list[str], timeout: int):
-        assert command == ["agent-browser", "--version"]
-        return 0, "agent-browser 1.0.0", ""
+        raise AssertionError("Browser tasks should build an action plan, not run health check.")
 
     result = run_workflow(
         "Open the browser and inspect the page",
@@ -78,12 +77,15 @@ Run `agent-browser skills get core`.
     assert "<!-- Selected Skill -->" in result.conversation_context
     assert "Run `agent-browser skills get core`." in result.conversation_context
     assert tool_event.output["tool_name"] == "skill:agent_browser"
-    assert tool_event.output["tool_result"]["success"] is True
-    assert tool_event.output["tool_result"]["action"] == "health_check"
+    assert tool_event.output["tool_result"]["success"] is False
+    assert tool_event.output["tool_result"]["action"] == "browser.task"
     assert "browser.open_url" in tool_event.output["tool_result"]["supported_actions"]
-    assert tool_event.output["tool_result"]["permission_level"] == "safe"
-    assert tool_event.output["tool_result"]["rollback"]["status"] == "not_required"
-    assert tool_event.output["tool_result"]["stdout"] == "agent-browser 1.0.0"
+    assert "browser.task" in tool_event.output["tool_result"]["supported_actions"]
+    assert tool_event.output["tool_result"]["permission_level"] == "network"
+    assert tool_event.output["tool_result"]["status"] == "confirmation_required"
+    assert result.pending_confirmation["action"] == "browser.task"
+    assert result.pending_confirmation["plan"]["goal"] == "Open the browser and inspect the page"
+    assert result.final_result is None
 
 
 def test_workflow_stops_when_skill_action_requires_confirmation(tmp_path):
@@ -147,7 +149,7 @@ Run `agent-browser skills get core`.
     assert result.events[-1].event_type == "await_confirmation"
 
 
-def test_workflow_builds_browser_open_url_confirmation_from_user_input(tmp_path):
+def test_workflow_builds_open_url_confirmation_from_simple_open_request(tmp_path):
     skill_dir = tmp_path / "skills" / "agent_browser"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -166,7 +168,7 @@ Run `agent-browser skills get core`.
     registry = LocalSkillRegistry(tmp_path / "skills", tmp_path / "state.json")
 
     result = run_workflow(
-        "打开百度网页",
+        "open https://www.baidu.com",
         llm_client=SkillToolRoutingLLMClient(),
         skill_registry=registry,
         enable_skills=True,

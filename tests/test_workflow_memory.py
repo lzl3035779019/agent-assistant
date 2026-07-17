@@ -45,7 +45,8 @@ def test_memory_write_request_does_not_call_search_tool(tmp_path):
     assert result.plan is None
     assert result.sources == []
     assert "tool" not in [event.agent for event in result.events]
-    assert result.events[1].output["intent"] == "memory_update"
+    assert result.events[1].output["intent"] == "personal_fact_statement"
+    assert result.events[1].output["need_memory"] is True
     assert result.events[1].output["execution_mode"] == "direct_answer"
     assert result.events[-1].agent == "memory"
     assert result.events[-1].output["saved_count"] == 1

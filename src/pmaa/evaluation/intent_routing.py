@@ -14,6 +14,7 @@ ROUTING_FIELDS = [
     "intent",
     "task_kind",
     "execution_mode",
+    "need_memory",
     "need_tools",
     "required_tool",
     "should_plan",
@@ -24,6 +25,7 @@ class ExpectedRoutingDecision(BaseModel):
     intent: str
     task_kind: str
     execution_mode: str
+    need_memory: bool = False
     need_tools: bool
     required_tool: str = "none"
     should_plan: bool

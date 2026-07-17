@@ -1,6 +1,8 @@
+import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 from collections.abc import Callable
 from typing import Literal
@@ -39,7 +41,7 @@ class SkillRuntimeInspector:
         self,
         command_exists: Callable[[str], bool] | None = None,
     ) -> None:
-        self._command_exists = command_exists or (lambda command: shutil.which(command) is not None)
+        self._command_exists = command_exists or _command_can_run
 
     def inspect(self, skill: SkillRecord) -> SkillRuntimeReport:
         command_examples = _extract_command_examples(skill.body)
@@ -78,7 +80,7 @@ class SkillRuntimeInstaller:
     def __init__(
         self,
         runner: Callable[[str, int], tuple[int, str, str]] | None = None,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = 600,
     ) -> None:
         self._runner = runner or _run_command
         self._timeout_seconds = timeout_seconds
@@ -104,13 +106,86 @@ class SkillRuntimeInstaller:
 
 def _run_command(command: str, timeout_seconds: int) -> tuple[int, str, str]:
     completed = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command],
+        ["powershell", "-NoProfile", "-Command", _to_powershell_script(command)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=_build_command_env(),
         timeout=timeout_seconds,
         check=False,
     )
-    return completed.returncode, completed.stdout, completed.stderr
+    return completed.returncode, completed.stdout or "", completed.stderr or ""
+
+
+def _to_powershell_script(command: str) -> str:
+    parts = [part.strip() for part in re.split(r"\s+&&\s+", command) if part.strip()]
+    if len(parts) <= 1:
+        return command
+    guarded_parts: list[str] = []
+    for part in parts:
+        guarded_parts.append(part)
+        guarded_parts.append("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }")
+    return "; ".join(guarded_parts)
+
+
+def _build_command_env() -> dict[str, str]:
+    env = os.environ.copy()
+    proxy_url = _runtime_proxy_url(env)
+    if proxy_url:
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "npm_config_proxy",
+            "npm_config_https_proxy",
+        ]:
+            env.setdefault(key, proxy_url)
+    return env
+
+
+def _runtime_proxy_url(env: dict[str, str]) -> str:
+    configured = (
+        env.get("PMAA_RUNTIME_PROXY_URL")
+        or env.get("PMAA_PROXY_URL")
+        or env.get("HTTPS_PROXY")
+        or env.get("HTTP_PROXY")
+    )
+    if configured:
+        return configured
+    if _is_local_port_open(7897):
+        return "http://127.0.0.1:7897"
+    return ""
+
+
+def _is_local_port_open(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def _command_can_run(command: str) -> bool:
+    resolved = shutil.which(command)
+    if resolved is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [resolved, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
 
 
 def _extract_command_examples(body: str) -> list[str]:
@@ -132,10 +207,24 @@ def _normalize_command_line(line: str) -> str:
     if not stripped or stripped.startswith("#"):
         return ""
     stripped = stripped.removeprefix("$").strip()
+    stripped = _strip_inline_comment(stripped)
     first = _first_command_name(stripped)
-    if not first or first in {"cd", "echo", "cat", "export"}:
+    if (
+        not first
+        or first in {"cd", "echo", "cat", "export", "skills"}
+        or first.startswith("@")
+        or "://" in first
+    ):
         return ""
     return stripped
+
+
+def _strip_inline_comment(command: str) -> str:
+    try:
+        parts = shlex.split(command, comments=True, posix=True)
+    except ValueError:
+        return command
+    return " ".join(parts)
 
 
 def _command_names(commands: list[str]) -> list[str]:

@@ -6,6 +6,9 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
+from pmaa.skills.runtime import _build_command_env, _command_can_run
+from pmaa.tools.email_tool import send_email_from_plan
+
 
 class ActionExecutorRegistry:
     def __init__(self) -> None:
@@ -37,16 +40,17 @@ def create_default_executor_registry(
     registry = ActionExecutorRegistry()
     registry.register(
         "browser.open_url",
-        _build_browser_open_url_executor(browser_opener or webbrowser.open),
+        _build_browser_open_url_executor(browser_opener or webbrowser.open_new_tab),
     )
     registry.register(
         "browser.task",
         _build_browser_task_executor(
-            command_exists=command_exists or (lambda command: shutil.which(command) is not None),
+            command_exists=command_exists or _command_can_run,
             command_runner=command_runner or _run_command,
             timeout_seconds=timeout_seconds,
         ),
     )
+    registry.register("email.send", send_email_from_plan)
     return registry
 
 
@@ -159,11 +163,27 @@ def _split_command(command: str) -> list[str]:
 
 
 def _run_command(command: list[str], timeout_seconds: int) -> tuple[int, str, str]:
+    if not command:
+        return -1, "", "Command is empty."
+    resolved_command = shutil.which(command[0])
+    if resolved_command is None:
+        return -1, "", f"Command not found: {command[0]}"
     completed = subprocess.run(
-        command,
+        [resolved_command, *command[1:]],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=_build_browser_command_env(),
         timeout=timeout_seconds,
         check=False,
     )
-    return completed.returncode, completed.stdout, completed.stderr
+    return completed.returncode, completed.stdout or "", completed.stderr or ""
+
+
+def _build_browser_command_env() -> dict[str, str]:
+    env = _build_command_env()
+    env.setdefault("AGENT_BROWSER_HEADED", "true")
+    env.setdefault("AGENT_BROWSER_NAMESPACE", "pmaa-visible")
+    env.setdefault("AGENT_BROWSER_SESSION", "default")
+    return env

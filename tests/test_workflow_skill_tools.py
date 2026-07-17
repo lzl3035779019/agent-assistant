@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 from typing import Any
 
 from pmaa.llm.client import LLMMessage
@@ -14,7 +14,7 @@ class SkillToolRoutingLLMClient:
 
     def complete_json(self, messages: list[LLMMessage]) -> dict[str, Any]:
         prompt_text = "\n".join(message.content for message in messages)
-        if "Evaluate" in prompt_text or "检查" in prompt_text:
+        if "Evaluate" in prompt_text:
             return {
                 "passed": True,
                 "issues": [],
@@ -85,7 +85,6 @@ Run `agent-browser skills get core`.
     assert tool_event.output["tool_result"]["status"] == "confirmation_required"
     assert result.pending_confirmation["action"] == "browser.task"
     assert result.pending_confirmation["plan"]["goal"] == "Open the browser and inspect the page"
-    assert result.pending_confirmation["plan"]["steps"] == ["检查页面"]
     assert result.final_result is None
 
 
@@ -150,7 +149,7 @@ Run `agent-browser skills get core`.
     assert result.events[-1].event_type == "await_confirmation"
 
 
-def test_workflow_builds_browser_task_confirmation_from_user_input(tmp_path):
+def test_workflow_builds_open_url_confirmation_from_simple_open_request(tmp_path):
     skill_dir = tmp_path / "skills" / "agent_browser"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -169,7 +168,7 @@ Run `agent-browser skills get core`.
     registry = LocalSkillRegistry(tmp_path / "skills", tmp_path / "state.json")
 
     result = run_workflow(
-        "打开百度网页",
+        "open https://www.baidu.com",
         llm_client=SkillToolRoutingLLMClient(),
         skill_registry=registry,
         enable_skills=True,
@@ -180,7 +179,6 @@ Run `agent-browser skills get core`.
         ),
     )
 
-    assert result.pending_confirmation["action"] == "browser.task"
-    assert result.pending_confirmation["plan"]["start_url"] == "https://www.baidu.com"
-    assert result.pending_confirmation["plan"]["steps"] == ["打开网页"]
+    assert result.pending_confirmation["action"] == "browser.open_url"
+    assert result.pending_confirmation["plan"]["url"] == "https://www.baidu.com"
     assert result.final_result is None

@@ -16,6 +16,7 @@ from typing import Any, Callable, Literal
 from uuid import uuid4
 
 from pmaa.wiki.importer import (
+    WikiDeleteResult,
     WikiImportPreview,
     WikiImportResult,
     create_gbrain_wiki_service,
@@ -24,7 +25,7 @@ from pmaa.wiki.enrichment import GBrainSkillResult, enrich_source_with_gbrain_sk
 from pmaa.wiki.semantic_model import SemanticModelResult, build_semantic_knowledge_model
 
 
-WikiJobKind = Literal["preview", "commit", "enrich", "semantic_model"]
+WikiJobKind = Literal["preview", "commit", "delete", "enrich", "semantic_model"]
 WikiJobState = Literal["queued", "running", "succeeded", "failed"]
 
 
@@ -35,7 +36,7 @@ class WikiImportJob:
     state: WikiJobState
     created_at: str
     completed_at: str = ""
-    result: WikiImportPreview | WikiImportResult | GBrainSkillResult | SemanticModelResult | None = None
+    result: WikiImportPreview | WikiImportResult | WikiDeleteResult | GBrainSkillResult | SemanticModelResult | None = None
     error: str = ""
 
 
@@ -46,7 +47,7 @@ class _JobRecord:
     state: WikiJobState
     created_at: str
     completed_at: str = ""
-    result: WikiImportPreview | WikiImportResult | GBrainSkillResult | SemanticModelResult | None = None
+    result: WikiImportPreview | WikiImportResult | WikiDeleteResult | GBrainSkillResult | SemanticModelResult | None = None
     error: str = ""
 
 
@@ -73,6 +74,10 @@ def start_wiki_commit_job(import_id: str) -> WikiImportJob:
     return _start_job("commit", lambda: _run_commit(import_id))
 
 
+def start_wiki_delete_source_job(source_slug: str) -> WikiImportJob:
+    return _start_job("delete", lambda: create_gbrain_wiki_service().delete_source(source_slug))
+
+
 def start_gbrain_skill_enrichment_job(source_slug: str) -> WikiImportJob:
     return _start_job("enrich", lambda: enrich_source_with_gbrain_skills(source_slug))
 
@@ -91,7 +96,7 @@ def get_wiki_import_job(job_id: str | None) -> WikiImportJob | None:
 
 def _start_job(
     kind: WikiJobKind,
-    operation: Callable[[], WikiImportPreview | WikiImportResult | GBrainSkillResult | SemanticModelResult],
+    operation: Callable[[], WikiImportPreview | WikiImportResult | WikiDeleteResult | GBrainSkillResult | SemanticModelResult],
 ) -> WikiImportJob:
     job_id = str(uuid4())
     record = _JobRecord(
@@ -109,7 +114,7 @@ def _start_job(
 
 def _execute(
     job_id: str,
-    operation: Callable[[], WikiImportPreview | WikiImportResult | GBrainSkillResult | SemanticModelResult],
+    operation: Callable[[], WikiImportPreview | WikiImportResult | WikiDeleteResult | GBrainSkillResult | SemanticModelResult],
 ) -> None:
     with _LOCK:
         record = _JOBS[job_id]
@@ -120,7 +125,7 @@ def _execute(
         with _LOCK:
             record = _JOBS[job_id]
             record.state = "failed"
-            record.error = str(exc)
+            record.error = _format_job_error(exc)
             record.completed_at = _now()
         return
     with _LOCK:
@@ -161,6 +166,24 @@ def _consume_unexpected_future_error(future: Future[Any]) -> None:
     # executor-level exception from being silently ignored without touching UI
     # state (for example, an unexpected programming error before the try block).
     future.result()
+
+
+def _format_job_error(exc: BaseException) -> str:
+    lines = [str(exc) or exc.__class__.__name__]
+    if isinstance(exc, BaseExceptionGroup):
+        for nested in _flatten_exception_group(exc):
+            lines.append(f"{nested.__class__.__name__}: {nested}")
+    return "\n".join(dict.fromkeys(line for line in lines if line))
+
+
+def _flatten_exception_group(exc: BaseExceptionGroup) -> list[BaseException]:
+    nested_errors: list[BaseException] = []
+    for nested in exc.exceptions:
+        if isinstance(nested, BaseExceptionGroup):
+            nested_errors.extend(_flatten_exception_group(nested))
+        else:
+            nested_errors.append(nested)
+    return nested_errors
 
 
 def _now() -> str:

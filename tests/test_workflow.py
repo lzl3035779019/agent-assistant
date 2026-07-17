@@ -139,18 +139,14 @@ def test_browser_tool_input_searches_official_site_when_url_is_missing():
 
     result = _tool_input_for_direct_call(
         "skill:agent_browser",
-        "打开 Cursor 官网",
+        "open Cursor website",
         registry,
     )
 
-    assert search_queries == ["Cursor 官网"]
+    assert search_queries == []
     assert result == {
-        "action": "browser.task",
-        "args": {
-            "goal": "打开 Cursor 官网",
-            "start_url": "https://www.cursor.com",
-            "steps": ["打开网页"],
-        },
+        "action": "browser.open_url",
+        "args": {"url": "https://cursor.com"},
     }
 
 
@@ -170,17 +166,13 @@ def test_browser_tool_input_normalizes_search_result_to_site_homepage_for_offici
 
     result = _tool_input_for_direct_call(
         "skill:agent_browser",
-        "打开 Vercel 官网",
+        "open Vercel official website",
         registry,
     )
 
     assert result == {
-        "action": "browser.task",
-        "args": {
-            "goal": "打开 Vercel 官网",
-            "start_url": "https://vercel.com",
-            "steps": ["打开网页"],
-        },
+        "action": "browser.open_url",
+        "args": {"url": "https://vercel.com"},
     }
 
 
@@ -194,19 +186,14 @@ def test_browser_tool_input_does_not_search_when_url_is_present():
 
     result = _tool_input_for_direct_call(
         "skill:agent_browser",
-        "打开 https://openai.com",
+        "open https://openai.com",
         registry,
     )
 
     assert result == {
-        "action": "browser.task",
-        "args": {
-            "goal": "打开 https://openai.com",
-            "start_url": "https://openai.com",
-            "steps": ["打开网页"],
-        },
+        "action": "browser.open_url",
+        "args": {"url": "https://openai.com"},
     }
-
 
 def test_browser_tool_input_builds_task_for_generic_browser_tasks():
     registry = ToolRegistry()

@@ -2,6 +2,7 @@ from collections.abc import Callable
 
 from pmaa.config import load_settings, settings
 from pmaa.schemas.task import Source
+from pmaa.tools.email_tool import EmailTool
 from pmaa.tools.gbrain import GBrainGetPageTool, GBrainKnowledgeTool
 from pmaa.tools.mcp_client import MCPClient, MCPServerConfig
 from pmaa.tools.mcp_search import CallableSearchTool, MCPStdioSearchTool
@@ -113,3 +114,7 @@ def create_wiki_get_page_tool(
         mcp_client,
         get_page_tool_name=current_settings.gbrain_mcp_get_page_tool,
     )
+
+
+def create_email_tool() -> EmailTool:
+    return EmailTool()

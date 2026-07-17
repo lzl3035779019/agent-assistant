@@ -28,6 +28,35 @@ def test_build_wiki_graph_html_renders_nodes_and_edges():
     assert "wiki-edge-detail" in html
 
 
+def test_build_wiki_graph_html_updates_details_from_node_and_edge_clicks():
+    graph = WikiGraph(
+        nodes=[
+            WikiGraphNode("source:notes.md", "notes.md", "source"),
+            WikiGraphNode("wiki/concept/rag", "RAG", "concept"),
+        ],
+        edges=[
+            WikiGraphEdge(
+                source="source:notes.md",
+                target="wiki/concept/rag",
+                edge_type="supports",
+            )
+        ],
+    )
+
+    html = build_wiki_graph_html(graph)
+
+    assert 'data-detail-target="wiki-edge-0"' in html
+    assert 'data-detail-target="wiki-node-0"' in html
+    assert 'data-detail-target="wiki-node-1"' in html
+    assert 'id="wiki-node-1"' in html
+    assert "wiki-node-detail" in html
+    assert "showDetail(targetId)" in html
+    assert "addEventListener('click'" in html
+    assert "event.target.closest('[data-detail-target]')" in html
+    assert "is-selected" in html
+    assert "trigger.classList.toggle('is-selected'" in html
+
+
 def test_build_wiki_graph_html_expands_large_graph():
     graph = WikiGraph(
         nodes=[WikiGraphNode("file:big.md", "big.md", "file")]
@@ -44,4 +73,13 @@ def test_build_wiki_graph_html_expands_large_graph():
     html = build_wiki_graph_html(graph)
 
     assert 'viewBox="0 0 1780 1312"' in html
-    assert "点击连线查看关系详情" in html
+    assert ">Page 1</text>" in html
+    assert ">Page 285</text>" in html
+    assert 'class="wiki-graph-toolbar"' in html
+    assert 'data-action="zoom-in"' in html
+    assert 'data-action="zoom-out"' in html
+    assert 'data-action="reset"' in html
+    assert 'data-wiki-graph-height="920"' in html
+    assert "addEventListener('wheel'" in html
+    assert "addEventListener('pointerdown'" in html
+    assert "点击连线查看关系" in html

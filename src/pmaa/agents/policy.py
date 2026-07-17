@@ -32,7 +32,7 @@ class PolicyDecision(BaseModel):
 
 class PolicyAgent:
     name = "policy"
-    supported_tools = {"search", "knowledge", "wiki_get_page"}
+    supported_tools = {"search", "knowledge", "wiki_get_page", "email"}
 
     def __init__(
         self,
@@ -108,6 +108,24 @@ class PolicyAgent:
                 should_plan=False,
                 confidence=0.99,
                 reason="用户询问系统自身模型信息。",
+            )
+        if self._is_email_request(normalized_input):
+            send_intent = self._is_email_send_request(normalized_input)
+            return PolicyDecision(
+                intent="email_send" if send_intent else "email_query",
+                task_kind="email_task",
+                execution_mode="tool_call",
+                need_tools=True,
+                required_tool="email",
+                should_plan=False,
+                requires_confirmation=send_intent,
+                risk_level="high" if send_intent else "medium",
+                confidence=0.97,
+                reason=(
+                    "用户请求发送或编写邮件，发送动作必须等待用户确认。"
+                    if send_intent
+                    else "用户请求读取或总结邮箱最近邮件。"
+                ),
             )
         if self._is_wiki_page_request(normalized_input):
             return PolicyDecision(
@@ -301,6 +319,8 @@ class PolicyAgent:
             "casual_response",
             "personal_fact_statement",
             "follow_up",
+            "email_query",
+            "email_send",
         }
 
     @classmethod
@@ -514,6 +534,20 @@ class PolicyAgent:
             "which model",
         ]
         return any(keyword in normalized_input for keyword in model_identity_keywords)
+
+    @staticmethod
+    def _is_email_request(normalized_input: str) -> bool:
+        return any(
+            keyword in normalized_input
+            for keyword in ["邮件", "邮箱", "qq邮箱", "email", "mail", "inbox"]
+        )
+
+    @staticmethod
+    def _is_email_send_request(normalized_input: str) -> bool:
+        return any(
+            keyword in normalized_input
+            for keyword in ["发送", "发邮件", "写邮件", "回复", "回邮件", "send", "reply"]
+        )
 
     @staticmethod
     def _is_wiki_page_request(normalized_input: str) -> bool:

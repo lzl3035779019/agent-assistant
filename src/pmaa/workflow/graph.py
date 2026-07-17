@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from langgraph.graph import END, START, StateGraph
 
 from pmaa.agents.knowledge import KnowledgeAgent
+from pmaa.agents.email import EmailAgent
 from pmaa.agents.memory import MemoryAgent
 from pmaa.agents.planner import PlannerAgent
 from pmaa.agents.reflection import ReflectionAgent
@@ -17,7 +18,7 @@ from pmaa.schemas.task import AgentEvent, ExecutionPlan, FinalResult, PlanStep, 
 from pmaa.skills.registry import LocalSkillRegistry
 from pmaa.skills.actions import create_default_action_registry
 from pmaa.skills.tool_binding import SkillToolBindingService
-from pmaa.tools.factory import create_knowledge_tool, create_search_tool, create_wiki_get_page_tool
+from pmaa.tools.factory import create_email_tool, create_knowledge_tool, create_search_tool, create_wiki_get_page_tool
 from pmaa.tools.registry import ToolRegistry
 from pmaa.tools.search_tool import mock_search
 from pmaa.workflow.state import WorkflowGraphState, WorkflowResult
@@ -79,6 +80,8 @@ def _tool_input_for_direct_call(
     user_input: str,
     registry: ToolRegistry | None = None,
 ) -> object:
+    if tool_name == "email":
+        return EmailAgent().build_tool_request(user_input)
     if not tool_name.startswith("skill:"):
         return user_input
     if not _is_browser_skill_tool(tool_name):
@@ -91,6 +94,8 @@ def _tool_input_for_direct_call(
         and _should_resolve_site_with_search(user_input)
     ):
         url = _resolve_official_site_url(user_input, registry)
+    if url and _is_simple_browser_open_request(user_input):
+        return _build_browser_open_url_request(url)
     return _build_browser_task_request(user_input, url)
 
 
@@ -110,6 +115,46 @@ def _build_browser_task_request(user_input: str, start_url: str = "") -> dict[st
         "action": "browser.task",
         "args": args,
     }
+
+
+def _build_browser_open_url_request(url: str) -> dict[str, object]:
+    return {
+        "action": "browser.open_url",
+        "args": {"url": url},
+    }
+
+
+def _is_simple_browser_open_request(user_input: str) -> bool:
+    text = user_input.lower()
+    automation_markers = (
+        "screenshot",
+        "capture",
+        "click",
+        "fill",
+        "form",
+        "read",
+        "extract",
+        "scrape",
+        "inspect",
+        "test",
+        "qa",
+        "login",
+        "search",
+        "截图",
+        "截屏",
+        "点击",
+        "填写",
+        "填表",
+        "表单",
+        "读取",
+        "提取",
+        "抓取",
+        "检查",
+        "测试",
+        "登录",
+        "搜索",
+    )
+    return not any(marker in text for marker in automation_markers)
 
 
 def _infer_browser_steps(user_input: str, start_url: str = "") -> list[str]:
@@ -249,6 +294,9 @@ def _extract_url_to_open(user_input: str) -> str:
     if match:
         return match.group(0)
     normalized = user_input.lower()
+    plain_brand_url = _plain_brand_homepage_url(normalized)
+    if plain_brand_url:
+        return plain_brand_url
     product_official_sites = [
         (("文心一言", "文小言", "ernie bot", "yiyan"), "https://yiyan.baidu.com"),
         (("文心大模型", "wenxin"), "https://wenxin.baidu.com"),
@@ -258,10 +306,64 @@ def _extract_url_to_open(user_input: str) -> str:
             return url
     if "百度" in normalized or "baidu" in normalized:
         return "https://www.baidu.com"
+    if "百度" in normalized:
+        return "https://www.baidu.com"
     domain_match = re.search(r"\b[a-z0-9.-]+\.[a-z]{2,}\b", normalized)
     if domain_match:
         return f"https://{domain_match.group(0)}"
     return ""
+
+
+def _plain_brand_homepage_url(normalized_input: str) -> str:
+    tokens = re.findall(r"(?<![a-z0-9-])([a-z][a-z0-9-]{1,40})(?![a-z0-9-])", normalized_input)
+    stopwords = {
+        "open",
+        "visit",
+        "go",
+        "to",
+        "the",
+        "a",
+        "an",
+        "site",
+        "website",
+        "web",
+        "page",
+        "homepage",
+        "official",
+        "please",
+        "help",
+        "me",
+        "www",
+        "http",
+        "https",
+    }
+    brands = [token for token in tokens if token not in stopwords]
+    if len(brands) != 1:
+        return ""
+    if not _looks_like_site_open_request(normalized_input) and not re.search(
+        r"[\u4e00-\u9fff]", normalized_input
+    ):
+        return ""
+    return f"https://{brands[0]}.com"
+
+
+def _looks_like_site_open_request(normalized_input: str) -> bool:
+    return any(
+        marker in normalized_input
+        for marker in (
+            "open",
+            "visit",
+            "site",
+            "website",
+            "official",
+            "homepage",
+            "打开",
+            "访问",
+            "进入",
+            "网站",
+            "官网",
+        )
+    )
 
 
 def _extract_wiki_slug_from_input(user_input: str) -> str:
@@ -288,6 +390,7 @@ def build_workflow_graph(
     registry = ToolRegistry()
     search_tool = create_search_tool() if use_configured_search else mock_search
     registry.register("search", search_tool)
+    registry.register("email", create_email_tool())
     knowledge_tool = create_knowledge_tool()
     if knowledge_tool is not None:
         registry.register("knowledge", knowledge_tool)
@@ -306,6 +409,7 @@ def build_workflow_graph(
     planner = PlannerAgent(llm_client=active_llm_client)
     searcher = SearchAgent()
     knowledge_agent = KnowledgeAgent()
+    email_agent = EmailAgent()
     tool_agent = ToolAgent(registry)
     writer = WriterAgent(llm_client=active_llm_client)
     reflector = ReflectionAgent(llm_client=active_llm_client)
@@ -578,10 +682,8 @@ def build_workflow_graph(
                 "Direct tool-call route skips planner; answer quality depends on tool results."
             ],
         )
-        tool_result = tool_agent.invoke(
-            tool_name,
-            _tool_input_for_direct_call(tool_name, state["user_input"], registry),
-        )
+        tool_input = _tool_input_for_direct_call(tool_name, state["user_input"], registry)
+        tool_result = tool_agent.invoke(tool_name, tool_input)
         sources, retrieval_diagnostic = _sources_and_retrieval_diagnostic(tool_result)
         pending_confirmation = _pending_confirmation_from_tool_result(tool_result)
         event_output = {
@@ -600,7 +702,7 @@ def build_workflow_graph(
             "pending_confirmation": pending_confirmation,
             "events": _append_event(
                 state,
-                tool_agent.name,
+                email_agent.name if tool_name == "email" else tool_agent.name,
                 "completed",
                 event_output,
             ),
@@ -649,6 +751,17 @@ def build_workflow_graph(
     def writer_node(state: WorkflowGraphState) -> WorkflowGraphState:
         plan = state["plan"]
         sources = state.get("sources", [])
+        tool_result = state.get("tool_result", {})
+        if isinstance(tool_result, dict) and tool_result.get("answer"):
+            return {
+                "draft_answer": str(tool_result["answer"]),
+                "events": _append_event(
+                    state,
+                    writer.name,
+                    "completed",
+                    {"answer_length": len(str(tool_result["answer"]))},
+                ),
+            }
         retrieval_diagnostic = state.get("tool_result", {}).get("retrieval_diagnostic", {})
         draft_answer = (
             writer.write_retrieval_diagnostic(retrieval_diagnostic)
@@ -670,6 +783,27 @@ def build_workflow_graph(
         }
 
     def reflection_node(state: WorkflowGraphState) -> WorkflowGraphState:
+        tool_result = state.get("tool_result", {})
+        if isinstance(tool_result, dict) and tool_result.get("tool_name") == "email":
+            return {
+                "reflection": ReflectionResult(
+                    passed=True,
+                    issues=[],
+                    suggested_fix="",
+                    need_retry=False,
+                ),
+                "events": _append_event(
+                    state,
+                    reflector.name,
+                    "completed",
+                    {
+                        "passed": True,
+                        "issues": [],
+                        "suggested_fix": "",
+                        "need_retry": False,
+                    },
+                ),
+            }
         reflection = reflector.reflect(
             state["user_input"],
             state.get("draft_answer", ""),

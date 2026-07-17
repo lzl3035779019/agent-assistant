@@ -1,4 +1,5 @@
 from pmaa.skills.confirmation import confirm_pending_action
+import pmaa.skills.executors as executors_module
 from pmaa.skills.executors import create_default_executor_registry
 
 
@@ -120,3 +121,44 @@ def test_confirm_pending_action_reports_browser_task_runner_exception():
     assert result["status"] == "failed"
     assert result["execution"]["status"] == "failed"
     assert "agent-browser" in result["execution"]["reason"]
+
+
+def test_browser_task_default_runner_resolves_windows_command_shim(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        executors_module.shutil,
+        "which",
+        lambda command: f"C:/Users/lzl/AppData/Roaming/npm/{command}.CMD",
+    )
+    monkeypatch.setattr(executors_module, "_build_command_env", lambda: {})
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["env"] = kwargs["env"]
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(executors_module.subprocess, "run", fake_run)
+
+    returncode, stdout, stderr = executors_module._run_command(
+        ["agent-browser", "open", "https://example.com"],
+        10,
+    )
+
+    assert returncode == 0
+    assert stdout == "ok"
+    assert stderr == ""
+    assert captured["args"] == [
+        "C:/Users/lzl/AppData/Roaming/npm/agent-browser.CMD",
+        "open",
+        "https://example.com",
+    ]
+    env = captured["env"]
+    assert env["AGENT_BROWSER_HEADED"] == "true"
+    assert env["AGENT_BROWSER_NAMESPACE"] == "pmaa-visible"

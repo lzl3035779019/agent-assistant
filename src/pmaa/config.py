@@ -47,6 +47,12 @@ class Settings(BaseModel):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     api_base_url: str = "http://127.0.0.1:8000"
+    qq_email_address: str = ""
+    qq_email_auth_code: str = ""
+    qq_email_imap_host: str = "imap.qq.com"
+    qq_email_imap_port: int = 993
+    qq_email_smtp_host: str = "smtp.qq.com"
+    qq_email_smtp_port: int = 465
 
 
 def _env(name: str, default: str = "") -> str:
@@ -99,6 +105,12 @@ def load_settings() -> Settings:
         deepseek_api_key=_env("DEEPSEEK_API_KEY") or _env("DEEPSEEk_API_KEY"),
         deepseek_base_url=_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
         api_base_url=_env("PMAA_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/"),
+        qq_email_address=_env("QQ_EMAIL_ADDRESS"),
+        qq_email_auth_code=_env("QQ_EMAIL_AUTH_CODE"),
+        qq_email_imap_host=_env("QQ_EMAIL_IMAP_HOST", "imap.qq.com"),
+        qq_email_imap_port=int(_env("QQ_EMAIL_IMAP_PORT", "993")),
+        qq_email_smtp_host=_env("QQ_EMAIL_SMTP_HOST", "smtp.qq.com"),
+        qq_email_smtp_port=int(_env("QQ_EMAIL_SMTP_PORT", "465")),
     )
 
 

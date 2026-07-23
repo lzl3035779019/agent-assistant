@@ -2,12 +2,12 @@ import imaplib
 import re
 import smtplib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from email import policy
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
-from email.utils import formatdate, make_msgid, parseaddr
+from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 from typing import Any
 
@@ -187,12 +187,32 @@ class EmailTool:
     def _list_recent(self, payload: dict[str, Any]) -> dict[str, Any]:
         limit = int(payload.get("limit") or 5)
         unread_only = bool(payload.get("unread_only") or False)
+        today_only = bool(payload.get("today_only") or False)
+        target_date = _coerce_target_date(payload.get("target_date"))
+        fetch_limit = max(limit, 50) if today_only else limit
         try:
-            messages = self._backend.list_recent(limit=limit, unread_only=unread_only)
+            messages = self._backend.list_recent(
+                limit=fetch_limit,
+                unread_only=unread_only,
+            )
         except EmailConfigurationError as exc:
             return _configuration_error(str(exc))
+        if today_only:
+            messages = [
+                message
+                for message in messages
+                if _message_matches_date(message, target_date)
+            ][:limit]
         if not messages:
-            scope = "未读邮件" if unread_only else "最近邮件"
+            scope = (
+                "今日未读邮件"
+                if today_only and unread_only
+                else "今日邮件"
+                if today_only
+                else "未读邮件"
+                if unread_only
+                else "最近邮件"
+            )
             return {
                 "tool_name": "email",
                 "action": "list_recent",
@@ -372,6 +392,29 @@ def _coerce_request(request: dict[str, Any] | str) -> dict[str, Any]:
     if isinstance(request, dict):
         return request
     return {"action": "list_recent", "query": str(request)}
+
+
+def _coerce_target_date(value: Any) -> date:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return date.fromisoformat(value.strip())
+        except ValueError:
+            pass
+    return datetime.now().astimezone().date()
+
+
+def _message_matches_date(message: EmailSummary, target_date: date) -> bool:
+    try:
+        sent_at = parsedate_to_datetime(message.date)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if sent_at is None:
+        return False
+    if sent_at.tzinfo is not None:
+        sent_at = sent_at.astimezone()
+    return sent_at.date() == target_date
 
 
 def _configuration_error(message: str) -> dict[str, Any]:

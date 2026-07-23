@@ -25,6 +25,26 @@ def build_policy_card_markdown(view: dict[str, Any] | None) -> str:
     if event is None:
         return ""
     output = event.get("output", {})
+    if event.get("event_type") == "decision_completed":
+        tasks = output.get("tasks", [])
+        assignments = "、".join(
+            str(task.get("assigned_to", "unknown"))
+            for task in tasks
+            if isinstance(task, dict)
+        ) or "无"
+        return "\n".join(
+            [
+                "#### Supervisor 决策",
+                "",
+                f"- 意图：`{output.get('intent', 'unknown')}`",
+                f"- 处理方式：`{output.get('mode', 'unknown')}`",
+                f"- 委派 Agent：`{assignments}`",
+                f"- 直属工具：`{output.get('direct_tool', 'none')}`",
+                f"- 用户确认：`{_bool_label(output.get('requires_confirmation'))}`",
+                f"- 置信度：`{output.get('confidence', 0)}`",
+                f"- 原因：{output.get('reason', '')}",
+            ]
+        )
     return "\n".join(
         [
             "#### 策略决策",
@@ -164,6 +184,13 @@ def _find_policy_event(view: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _is_policy_event(event: dict[str, Any]) -> bool:
     output = event.get("output", {})
+    if (
+        event.get("agent") == "supervisor"
+        and event.get("event_type") == "decision_completed"
+        and "intent" in output
+        and "mode" in output
+    ):
+        return True
     return (
         event.get("agent") == "supervisor"
         and event.get("event_type") == "completed"
@@ -174,6 +201,24 @@ def _is_policy_event(event: dict[str, Any]) -> bool:
 
 def _format_policy_event(index: int, event: dict[str, Any]) -> str:
     output = event.get("output", {})
+    if event.get("event_type") == "decision_completed":
+        tasks = output.get("tasks", [])
+        assignments = [
+            task.get("assigned_to", "unknown")
+            for task in tasks
+            if isinstance(task, dict)
+        ]
+        fields = [
+            ("intent", output.get("intent", "unknown")),
+            ("mode", output.get("mode", "unknown")),
+            ("assigned_agents", assignments),
+            ("direct_tool", output.get("direct_tool", "none")),
+            ("requires_confirmation", _bool_label(output.get("requires_confirmation"))),
+            ("confidence", output.get("confidence", 0)),
+            ("reason", output.get("reason", "")),
+        ]
+        detail = "\n".join(f"  {key}: {value}" for key, value in fields)
+        return f"[{index}] Supervisor 决策\n{detail}"
     fields = [
         ("intent", output.get("intent", "unknown")),
         ("task_kind", output.get("task_kind", "unknown")),

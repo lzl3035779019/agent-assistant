@@ -91,6 +91,31 @@ def test_email_tool_counts_today_unread_messages():
     assert result["unread_count"] == 2
 
 
+def test_email_tool_filters_recent_messages_to_target_date():
+    tool = EmailTool(FakeEmailBackend())
+
+    matching = tool(
+        {
+            "action": "list_recent",
+            "unread_only": True,
+            "today_only": True,
+            "target_date": "2026-07-16",
+        }
+    )
+    missing = tool(
+        {
+            "action": "list_recent",
+            "unread_only": True,
+            "today_only": True,
+            "target_date": "2026-07-17",
+        }
+    )
+
+    assert len(matching["messages"]) == 1
+    assert missing["messages"] == []
+    assert "今日未读邮件" in missing["answer"]
+
+
 def test_email_tool_gets_selected_message_body():
     result = EmailTool(FakeEmailBackend()).__call__(
         {"action": "get_message", "message_id": "1"}

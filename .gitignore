@@ -17,6 +17,8 @@ logs/
 tmp/
 data/*.sqlite3
 data/pmaa_skill_state.json
+data/*.log
+data/*.png
 
 # Local / imported skill source repositories can be large and independently versioned
 skills/*/_repo/

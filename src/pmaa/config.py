@@ -17,6 +17,9 @@ class Settings(BaseModel):
     tavily_api_key: str = ""
     tavily_base_url: str = "https://api.tavily.com/search"
     tavily_max_results: int = 5
+    github_token: str = ""
+    github_api_base_url: str = "https://api.github.com"
+    github_monitor_max_results: int = 10
     gbrain_mcp_enabled: bool = False
     gbrain_mcp_transport: str = "stdio"
     gbrain_mcp_command: str = "wsl.exe"
@@ -53,6 +56,13 @@ class Settings(BaseModel):
     qq_email_imap_port: int = 993
     qq_email_smtp_host: str = "smtp.qq.com"
     qq_email_smtp_port: int = 465
+    calendar_provider: str = "disabled"
+    calendar_ics_path: str = ""
+    calendar_timezone: str = "Asia/Shanghai"
+    automation_scheduler_enabled: bool = False
+    automation_poll_seconds: float = 60.0
+    daily_brief_schedule_enabled: bool = False
+    daily_brief_schedule_time: str = "08:00"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -83,6 +93,9 @@ def load_settings() -> Settings:
         tavily_api_key=_env("TAVILY_API_KEY"),
         tavily_base_url=_env("TAVILY_BASE_URL", "https://api.tavily.com/search"),
         tavily_max_results=int(_env("TAVILY_MAX_RESULTS", "5")),
+        github_token=_env("GITHUB_TOKEN"),
+        github_api_base_url=_env("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/"),
+        github_monitor_max_results=int(_env("GITHUB_MONITOR_MAX_RESULTS", "10")),
         gbrain_mcp_enabled=_env_bool("GBRAIN_MCP_ENABLED", False),
         gbrain_mcp_transport=_env("GBRAIN_MCP_TRANSPORT", "stdio").lower(),
         gbrain_mcp_command=_env("GBRAIN_MCP_COMMAND", "wsl.exe"),
@@ -111,6 +124,13 @@ def load_settings() -> Settings:
         qq_email_imap_port=int(_env("QQ_EMAIL_IMAP_PORT", "993")),
         qq_email_smtp_host=_env("QQ_EMAIL_SMTP_HOST", "smtp.qq.com"),
         qq_email_smtp_port=int(_env("QQ_EMAIL_SMTP_PORT", "465")),
+        calendar_provider=_env("CALENDAR_PROVIDER", "disabled").lower(),
+        calendar_ics_path=_env("CALENDAR_ICS_PATH"),
+        calendar_timezone=_env("CALENDAR_TIMEZONE", "Asia/Shanghai"),
+        automation_scheduler_enabled=_env_bool("AUTOMATION_SCHEDULER_ENABLED", False),
+        automation_poll_seconds=float(_env("AUTOMATION_POLL_SECONDS", "60")),
+        daily_brief_schedule_enabled=_env_bool("DAILY_BRIEF_SCHEDULE_ENABLED", False),
+        daily_brief_schedule_time=_env("DAILY_BRIEF_SCHEDULE_TIME", "08:00"),
     )
 
 

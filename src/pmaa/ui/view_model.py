@@ -6,6 +6,11 @@ from pmaa.workflow.state import WorkflowResult
 
 AGENT_LABELS = {
     "supervisor": "Supervisor",
+    "web_research": "Web Research Agent",
+    "memory": "Memory Agent",
+    "email": "Email Agent",
+    "daily_brief": "Daily Brief Agent",
+    "information_monitor": "Information Monitor Agent",
     "knowledge": "Knowledge",
     "planner": "Planner",
     "search": "Search",

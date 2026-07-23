@@ -1,148 +1,165 @@
 # Personal Multi-Agent Assistant (PMAA)
 
-PMAA 是一个本地优先的个人多智能体助手实验项目，基于 LangGraph 编排多个 Agent，用于任务路由、联网检索、本地知识库问答、长期记忆、Skill 调用、邮件处理和 Streamlit 可视化交互。
-
-当前项目重点不是做一个通用聊天壳，而是验证一套可观察、可扩展、可接入本地工具和个人知识库的 Agent 工作流。
+PMAA 是一个基于 Supervisor 层级架构的个人多智能体助手。系统通过统一任务协议和中央 Blackboard 编排 5 个专业 Agent，覆盖联网研究、长期记忆、邮件处理、每日简报与信息监控，并支持本地 GBrain Wiki 知识库和 MCP 工具扩展。
 
 ## 核心能力
 
-- 多 Agent 工作流：Supervisor、Policy、Planner、Search、Knowledge、Tool、Writer、Reflection、Memory、Email 等角色协作。
-- LLM Wiki 知识库：上传 PDF / DOCX / MD / TXT，交给 GBrain 原生索引，并在 PMAA 中展示知识库全景图。
-- 语义知识建模：读取 GBrain 原生分块，抽取概念、方法、项目等知识页，并写回 GBrain。
-- 知识库生命周期：支持删除来源页，并清理由该来源生成的 PMAA 语义知识页。
-- 可交互知识图谱：支持缩放、滚轮缩放、拖动画布，点击节点或连线查看详情。
-- Skill 管理：支持本地 Skill 导入、启用、运行环境检查和工具绑定。
-- 长期记忆：从对话中提取稳定偏好、事实和长期指令，用于后续任务上下文。
-- 邮件工具：支持 QQ 邮箱 IMAP / SMTP 的读取和发送能力。
-- Streamlit UI：提供对话、技能、记忆、LLM Wiki 等页面。
+- **Web Research Agent**：查询规划、联网搜索、证据评估、补充检索与引用整理。
+- **Memory Agent**：检索、提取、验证和维护用户画像、长期偏好与持续指令。
+- **Email Agent**：读取和分析 QQ 邮件、生成回复草稿；真实发送必须经过用户确认。
+- **Daily Brief Agent**：汇总当天邮件、关注主题新闻、日程与长期偏好。
+- **Information Monitor Agent**：定时跟踪公司、招聘、GitHub 项目和技术博客，基于快照识别重要变化。
+- **GBrain Wiki**：通过 MCP 接入 WSL 中的本地知识库，提供文档入库、语义检索、页面读取和关系可视化。
 
-## 架构概览
+## 多 Agent 架构
 
 ```text
-User
-  -> Streamlit / API
-  -> Supervisor / Policy
-  -> Planner 或 Direct Tool
-  -> Search / Knowledge / Skill / Email
-  -> Writer
-  -> Reflection
-  -> Final Response
+User / Scheduler
+       |
+Streamlit UI / FastAPI
+       |
+   Supervisor
+       |
+       +-- Web Research Agent
+       +-- Memory Agent
+       +-- Email Agent
+       +-- Daily Brief Agent
+       +-- Information Monitor Agent
+       |
+Central Blackboard
+  Task / Message / Result / Event / Artifact
+       |
+Tool Registry / MCP / Action Confirmation
 ```
 
-知识库相关链路：
+系统采用中心化通信：子 Agent 不直接相互调用，而是通过结构化 `AgentMessage` 向 Supervisor 申请能力。Supervisor 根据 `AgentTask.depends_on` 形成任务依赖图，对同一依赖层的就绪任务并发派发，并统一聚合 `AgentResult` 和执行事件。
+
+### 通信协议
+
+- `AgentTask`：目标、上下文、依赖关系、工具权限和输出约束。
+- `AgentMessage`：进度、证据、能力委派、澄清和错误消息。
+- `AgentResult`：结构化结果、来源、置信度和错误信息。
+- `AgentEvent`：任务开始、完成、挂起、恢复等可观测事件。
+
+## 主要工作流
+
+### 联网研究
 
 ```text
-Upload file
-  -> GBrain Inbox
-  -> gbrain-wiki-mcp
-  -> GBrain native index
-  -> PMAA Wiki graph / semantic modelling
+分析目标 -> 生成查询 -> 搜索 -> 检查证据
+                ^                 |
+                +---- 补充搜索 ---+
+                                  |
+                              形成研究结果
 ```
+
+### 长期记忆
+
+```text
+retrieve -> extract -> validate -> update / ignore
+```
+
+### 信息监控
+
+```text
+定时或手动触发 -> 收集证据 -> 对比历史快照 -> 评估变化 -> 通知用户
+```
+
+## 技术栈
+
+- Python 3.11+
+- FastAPI、Streamlit、LangGraph、Pydantic
+- DeepSeek OpenAI-compatible API
+- MCP（stdio / SSE / HTTP）
+- Tavily、GitHub API、QQ Mail IMAP/SMTP
+- SQLite、Pytest
 
 ## 快速启动
 
-推荐使用 `uv`：
+推荐使用 [uv](https://docs.astral.sh/uv/)：
 
 ```powershell
-uv venv
-uv pip install -e ".[dev]"
-uv run --no-sync streamlit run src/pmaa/ui/streamlit_app.py
+uv sync --extra dev
+Copy-Item .env.example .env
 ```
 
-如果当前环境使用 Conda，也可以：
+在 `.env` 中配置需要使用的模型、搜索、邮箱和知识库参数。不要提交真实密钥。
+
+启动 API：
 
 ```powershell
-conda run -n chain python -m pytest -q
-conda run -n chain python -m streamlit run src/pmaa/ui/streamlit_app.py
+uv run uvicorn pmaa.main:app --host 127.0.0.1 --port 8000
 ```
 
-默认访问：
-
-```text
-http://localhost:8501
-```
-
-## API 服务
+启动 Streamlit：
 
 ```powershell
-uv run uvicorn pmaa.main:app --reload --host 127.0.0.1 --port 8001
+uv run streamlit run src/pmaa/ui/streamlit_app.py --server.port 8501
 ```
 
-API 文档：
+访问地址：
 
-```text
-http://127.0.0.1:8001/docs
-```
+- Streamlit：`http://127.0.0.1:8501`
+- FastAPI 文档：`http://127.0.0.1:8000/docs`
 
-## 环境变量
-
-复制 `.env.example` 为 `.env`，再按需填写：
+## 可选配置
 
 ```env
-APP_NAME=PMAA
-APP_ENV=local
-
 LLM_PROVIDER=deepseek
 LLM_MODEL=deepseek-v4-flash
 DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 SEARCH_PROVIDER=tavily_mcp
 TAVILY_API_KEY=
-TAVILY_BASE_URL=https://api.tavily.com/search
-TAVILY_MAX_RESULTS=5
+
+GITHUB_TOKEN=
 
 GBRAIN_MCP_ENABLED=false
 GBRAIN_MCP_TRANSPORT=stdio
 GBRAIN_MCP_COMMAND=wsl.exe
-GBRAIN_INBOX_DIR=C:\Users\lzl\GbrainInbox
 
 QQ_EMAIL_ADDRESS=
 QQ_EMAIL_AUTH_CODE=
+
+AUTOMATION_SCHEDULER_ENABLED=false
 ```
 
-说明：
-
-- `LLM_PROVIDER=deepseek` 时使用 DeepSeek OpenAI-compatible 接口。
-- `SEARCH_PROVIDER=tavily_mcp` 时通过 Tavily MCP 做联网搜索。
-- `GBRAIN_MCP_ENABLED=true` 后会启用本地 GBrain MCP 知识库检索。
-- QQ 邮箱需要授权码，不是登录密码。
+完整配置及说明见 [`.env.example`](.env.example)。
 
 ## 测试
 
 ```powershell
-uv run --no-sync pytest -q
+uv run pytest -q
 ```
 
-或：
-
-```powershell
-conda run -n chain python -m pytest -q
-```
-
-当前本地验证结果：
+当前测试结果：
 
 ```text
-199 passed
+292 passed
 ```
+
+测试覆盖通信协议、Supervisor 决策、Agent 注册与权限校验、依赖调度、并发派发、子任务委派、后台任务、定时调度、邮件和监控流程。
 
 ## 目录结构
 
 ```text
-src/pmaa/agents      Agent 实现
-src/pmaa/workflow    LangGraph 工作流
-src/pmaa/tools       工具封装与注册
-src/pmaa/wiki        GBrain Wiki 导入、建模、删除
-src/pmaa/skills      Skill 注册、运行时与绑定
-src/pmaa/ui          Streamlit 界面
-tests                自动化测试
+src/pmaa/multi_agent    Supervisor、Agent、Runtime、Blackboard 和通信协议
+src/pmaa/tools          搜索、邮箱、GitHub、日历和 MCP 工具
+src/pmaa/storage        历史、记忆、后台任务、监控和通知存储
+src/pmaa/wiki           GBrain Wiki 接入与可视化
+src/pmaa/ui             Streamlit 页面和 API 客户端
+src/pmaa/api            FastAPI 接口
+tests                   自动化测试
+docs                    中文架构与开发文档
 ```
+
+## 安全设计
+
+- Agent 只能调用白名单中的工具。
+- 邮件发送等外部副作用必须经过用户确认。
+- `.env`、本地数据库、日志和运行截图均不会提交到 Git。
+- GBrain、邮箱和模型密钥保留在本地环境。
 
 ## 当前状态
 
-这是一个本地个人助手 MVP，已经具备端到端演示能力。仍需继续完善：
-
-- 更稳定的 GBrain 级联删除 / 版本管理机制
-- 更完善的 Skill 权限与审计
-- 更多真实工具接入
-- 更系统的部署和配置文档
+项目已具备本地端到端演示能力，适合作为多 Agent 调度、MCP 工具接入、长期记忆和个人自动化场景的工程实践。

@@ -5,22 +5,25 @@
 ## Unreleased
 
 ### Added
-- 新增 Policy Agent 第一版，负责意图、执行模式、工具需求、Memory 参与、确认需求和风险等级判断。
-- 在 Streamlit 思考过程区域新增 Policy 策略卡片，清晰展示意图、执行模式、工具需求、确认需求和风险等级。
+- 新增 Supervisor 层级式多 Agent Runtime，统一使用 `AgentTask`、`AgentMessage`、`AgentResult` 和 `AgentEvent` 通信。
+- 新增 Web Research、Memory、Email、Daily Brief、Information Monitor 五个专业子 Agent。
+- 新增中央 Blackboard、Agent Registry、工具白名单、任务依赖校验和动态能力委派。
+- 新增基于任务依赖的并发调度、挂起恢复、流式执行事件和统一结果聚合。
+- 新增每日简报、信息监控、GitHub 项目快照、后台任务和通知中心。
+- 新增多 Agent 中文开发文档和对应自动化测试。
 
 ### Changed
-- Supervisor 改为消费 Policy Agent 的策略决策，专注调度、执行顺序和结果汇总。
-- 记忆类请求不再由策略层判定“写入记忆”，而是标记 `need_memory`，由 Memory Agent 负责 extract、validate、update。
-- Agent 执行过程展示不再把 Supervisor 策略事件渲染成整块 JSON，而是格式化为可读字段。
-- Memory Agent 可从“偏好描述 + 当前任务请求”的混合输入中抽取稳定偏好，避免把整句任务请求写入长期记忆。
+- 将原 Policy/Planner 驱动的单工作流重构为 Supervisor 集中调度、子 Agent 独立执行的层级式架构。
+- README 更新为当前五 Agent 架构、通信协议、启动方式和安全说明。
+- Streamlit 长任务改为后台执行和局部轮询，切换页面不会中断 Agent 任务。
 
 ### Fixed
-- 修复 Policy Agent 只要存在历史上下文就误判为 follow-up 的问题，现在仅对明显依赖上下文的短追问使用历史上下文路由。
+- 修复实时信息被错误路由到浏览器 Skill 的问题，联网研究统一由 Web Research Agent 处理。
+- 修复 Monitor Agent 手动运行后只能看到通知、无法查看实际监控结果的问题。
+- 修复每日简报数据源缺失、页面重复刷新及后台任务恢复问题。
 
-- Policy Agent 对非明显上下文依赖的输入改由 LLM 判断，避免仅凭“这个/那个”等词误判 follow-up。
-- Memory Agent 新增回答后 LLM 会话汇总能力，可从完整对话中判断哪些稳定偏好、事实和长期指令值得写入长期记忆。
-- Policy Agent 对实时新闻、天气、最新信息查询增加工具选择校验，避免误把普通搜索任务路由到 `agent-browser`。
-- 浏览器打开网页时新增产品官网别名解析，避免“打开百度文心一言官网”被错误解析为百度首页。
+### Validation
+- 当前自动化测试结果：`292 passed`。
 ## 2026-07-14
 
 ### Added

@@ -2,11 +2,19 @@ from collections.abc import Callable
 
 from pmaa.config import load_settings, settings
 from pmaa.schemas.task import Source
+from pmaa.tools.calendar_tool import (
+    CalendarTool,
+    DisabledCalendarTool,
+    LocalIcsCalendarTool,
+)
 from pmaa.tools.email_tool import EmailTool
 from pmaa.tools.gbrain import GBrainGetPageTool, GBrainKnowledgeTool
+from pmaa.tools.github_tool import GitHubMonitorTool
+from pmaa.tools.interest_topic_tool import InterestTopicTool
 from pmaa.tools.mcp_client import MCPClient, MCPServerConfig
 from pmaa.tools.mcp_search import CallableSearchTool, MCPStdioSearchTool
 from pmaa.tools.search_tool import mock_search
+from pmaa.storage.interest_topic_store import SQLiteInterestTopicStore
 
 
 SearchTool = Callable[[str], list[Source]]
@@ -118,3 +126,30 @@ def create_wiki_get_page_tool(
 
 def create_email_tool() -> EmailTool:
     return EmailTool()
+
+
+def create_calendar_tool() -> CalendarTool:
+    current_settings = load_settings()
+    if current_settings.calendar_provider == "ics":
+        if not current_settings.calendar_ics_path:
+            return DisabledCalendarTool()
+        return LocalIcsCalendarTool(
+            current_settings.calendar_ics_path,
+            timezone=current_settings.calendar_timezone,
+        )
+    return DisabledCalendarTool()
+
+
+def create_github_monitor_tool() -> GitHubMonitorTool:
+    current_settings = load_settings()
+    return GitHubMonitorTool(
+        token=current_settings.github_token,
+        base_url=current_settings.github_api_base_url,
+        max_results=current_settings.github_monitor_max_results,
+    )
+
+
+def create_interest_topic_tool(
+    store: SQLiteInterestTopicStore | None = None,
+) -> InterestTopicTool:
+    return InterestTopicTool(store)

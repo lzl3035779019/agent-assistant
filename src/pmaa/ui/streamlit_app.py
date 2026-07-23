@@ -1,8 +1,7 @@
 import json
-import time
 from dataclasses import replace
 from importlib import reload
-from datetime import datetime
+from datetime import UTC, datetime
 from html import escape
 
 import streamlit as st
@@ -31,7 +30,33 @@ from pmaa.ui.chat_render import (
     normalize_markdown_content,
     render_user_message,
 )
-from pmaa.ui.api_client import confirm_action_via_api, stream_workflow_via_api
+from pmaa.ui.api_client import (
+    WorkflowAPIError,
+    confirm_action_via_api,
+    create_daily_brief_schedule_via_api,
+    create_interest_topic_via_api,
+    create_monitor_rule_via_api,
+    delete_interest_topic_via_api,
+    delete_daily_brief_schedule_via_api,
+    delete_monitor_rule_via_api,
+    get_background_job_via_api,
+    get_monitor_latest_result_via_api,
+    get_automation_status_via_api,
+    get_notification_unread_count_via_api,
+    list_monitor_rules_via_api,
+    list_daily_brief_schedules_via_api,
+    list_interest_topics_via_api,
+    list_background_jobs_via_api,
+    list_notifications_via_api,
+    mark_all_notifications_read_via_api,
+    mark_notification_read_via_api,
+    run_monitor_rule_via_api,
+    run_daily_brief_now_via_api,
+    submit_multi_agent_job_via_api,
+    update_monitor_rule_via_api,
+    update_interest_topic_selection_via_api,
+    update_daily_brief_schedule_by_id_via_api,
+)
 from pmaa.ui.conversation_context import build_conversation_context
 from pmaa.ui.export import build_bulk_markdown_export
 from pmaa.ui.message_state import message_has_pending_confirmation
@@ -837,6 +862,22 @@ if "email_selected_message_detail" not in st.session_state:
     st.session_state.email_selected_message_detail = None
 if "email_unread_refresh_nonce" not in st.session_state:
     st.session_state.email_unread_refresh_nonce = 0
+if "monitor_error" not in st.session_state:
+    st.session_state.monitor_error = ""
+if "monitor_notice" not in st.session_state:
+    st.session_state.monitor_notice = ""
+if "monitor_active_runs" not in st.session_state:
+    st.session_state.monitor_active_runs = {}
+if "monitor_expanded_result_rule_ids" not in st.session_state:
+    st.session_state.monitor_expanded_result_rule_ids = set()
+if "daily_brief_error" not in st.session_state:
+    st.session_state.daily_brief_error = ""
+if "daily_brief_notice" not in st.session_state:
+    st.session_state.daily_brief_notice = ""
+if "daily_brief_result" not in st.session_state:
+    st.session_state.daily_brief_result = None
+if "daily_brief_job_id" not in st.session_state:
+    st.session_state.daily_brief_job_id = ""
 if "email_unread_last_count" not in st.session_state:
     st.session_state.email_unread_last_count = None
 if "email_last_list_filter" not in st.session_state:
@@ -1093,18 +1134,6 @@ def build_live_view(events: list[dict], answer: str = "") -> dict:
     }
 
 
-def sse_agent_event_to_view_event(event_payload: dict) -> dict:
-    event = event_payload["event"]
-    agent = event.get("agent", "")
-    return {
-        "agent": agent,
-        "label": AGENT_LABELS.get(agent, agent.title()),
-        "event_type": event.get("event_type", ""),
-        "output": event.get("output", {}),
-        "timestamp": event.get("timestamp", ""),
-    }
-
-
 def call_email_tool(payload: dict) -> dict:
     try:
         result = EmailTool().__call__(payload)
@@ -1214,15 +1243,67 @@ def render_email_nav_badge_style(count: int) -> None:
     )
 
 
+def render_notification_nav_badge_style(button_key: str, count: int) -> None:
+    label = "99+" if count > 99 else str(count)
+    content = f'"{label}"' if count > 0 else "none"
+    st.markdown(
+        f"""
+        <style>
+        .st-key-{button_key} button {{
+            position: relative;
+            padding-right: 48px !important;
+        }}
+        .st-key-{button_key} button::after {{
+            content: {content};
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            min-width: 22px;
+            height: 22px;
+            padding: 0 7px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            background: #e5484d;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 850;
+            line-height: 22px;
+            box-shadow: 0 2px 8px rgba(229, 72, 77, .28);
+            box-sizing: border-box;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+@st.fragment(run_every="10s")
+def render_notification_nav_button(
+    *,
+    kind: str,
+    label: str,
+    page: str,
+    button_key: str,
+) -> None:
+    count = get_notification_unread_count_via_api(kind=kind)
+    render_notification_nav_badge_style(button_key, count)
+    if st.button(label, key=button_key, use_container_width=True):
+        st.session_state.active_page = page
+        st.rerun(scope="app")
+
+
 @st.fragment(run_every="60s")
-def render_email_nav_button(is_running: bool) -> None:
+def render_email_nav_button() -> None:
     count, error = get_email_unread_count(st.session_state.email_unread_refresh_nonce)
     last_count = st.session_state.get("email_unread_last_count")
     if count > 0 and (last_count is None or count > last_count):
         st.toast(f"你有 {count} 封未读邮件。")
     st.session_state.email_unread_last_count = count
     render_email_nav_badge_style(count)
-    if st.button("邮件助手  QQ Mail", key="nav_email", use_container_width=True, disabled=is_running):
+    if st.button("邮件助手  QQ Mail", key="nav_email", use_container_width=True):
         st.session_state.active_page = "email"
         st.rerun(scope="app")
     if error and error != "missing_config":
@@ -1459,6 +1540,783 @@ def render_email_trace_panel() -> None:
     if st.session_state.get("email_last_result"):
         st.markdown("#### Last Result")
         st.json(st.session_state.email_last_result)
+
+
+MONITOR_TARGET_LABELS = {
+    "公司动态": "company",
+    "招聘岗位": "jobs",
+    "新闻资讯": "news",
+    "GitHub 项目": "github",
+    "技术博客": "tech_blog",
+}
+
+
+def render_daily_brief_page() -> None:
+    st.markdown(
+        """
+        <div class="chat-header">
+          <div class="chat-title">每日简报 <span class="status-dot"></span></div>
+          <div class="muted">Daily Brief Agent · Email · Web Research · Calendar · Memory</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("汇总当天未读和重要邮件、关注主题新闻、今日日程与个人偏好。")
+
+    if st.session_state.daily_brief_notice:
+        st.success(st.session_state.daily_brief_notice)
+        st.session_state.daily_brief_notice = ""
+    if st.session_state.daily_brief_error:
+        st.error(st.session_state.daily_brief_error)
+        st.session_state.daily_brief_error = ""
+
+    try:
+        topics = list_interest_topics_via_api()
+        schedules = list_daily_brief_schedules_via_api()
+        brief_jobs = list_background_jobs_via_api(kind="daily_brief", limit=30)
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        return
+
+    st.markdown("### 定时简报计划")
+    with st.expander("新增简报计划"):
+        with st.form("create_daily_brief_schedule_form", clear_on_submit=True):
+            create_name = st.text_input("计划名称", placeholder="例如：晨间简报")
+            create_time = st.time_input(
+                "每天生成时间",
+                value=datetime.strptime("08:00", "%H:%M").time(),
+                step=900,
+            )
+            create_enabled = st.toggle("创建后启用", value=True)
+            create_submitted = st.form_submit_button(
+                "新增计划",
+                use_container_width=True,
+            )
+        if create_submitted:
+            if not create_name.strip():
+                st.session_state.daily_brief_error = "计划名称不能为空。"
+            else:
+                try:
+                    create_daily_brief_schedule_via_api(
+                        {
+                            "name": create_name.strip(),
+                            "enabled": create_enabled,
+                            "run_time": create_time.strftime("%H:%M"),
+                            "timezone": "Asia/Shanghai",
+                        }
+                    )
+                    st.session_state.daily_brief_notice = "简报计划已新增。"
+                except WorkflowAPIError as exc:
+                    st.session_state.daily_brief_error = str(exc)
+            st.rerun()
+
+    if not schedules:
+        st.info("还没有定时简报计划，可新增多个不同时间的计划。")
+    for schedule in schedules:
+        schedule_id = str(schedule["schedule_id"])
+        schedule_running = any(
+            job.get("status") in {"pending", "running"}
+            and str((job.get("request") or {}).get("metadata", {}).get("schedule_id") or "")
+            == schedule_id
+            for job in brief_jobs
+        )
+        with st.container(border=True):
+            summary_col, run_col, delete_col = st.columns(
+                [0.56, 0.24, 0.20],
+                vertical_alignment="center",
+            )
+            status_text = "已启用" if schedule.get("enabled") else "已停用"
+            summary_col.markdown(
+                f"**{schedule.get('name', '每日简报')}**  \n"
+                f"每天 `{schedule.get('run_time')}` · {status_text}"
+            )
+            if run_col.button(
+                "立即生成",
+                key=f"run_daily_brief_schedule_{schedule_id}",
+                use_container_width=True,
+                disabled=schedule_running,
+            ):
+                try:
+                    job = run_daily_brief_now_via_api(schedule_id=schedule_id)
+                    st.session_state.daily_brief_job_id = str(job["job_id"])
+                    st.session_state.daily_brief_result = None
+                    st.session_state.daily_brief_notice = "简报已提交后台生成。"
+                except WorkflowAPIError as exc:
+                    st.session_state.daily_brief_error = str(exc)
+                st.rerun()
+            if delete_col.button(
+                "删除",
+                key=f"delete_daily_brief_schedule_{schedule_id}",
+                use_container_width=True,
+            ):
+                try:
+                    delete_daily_brief_schedule_via_api(schedule_id)
+                    st.session_state.daily_brief_notice = "简报计划已删除。"
+                except WorkflowAPIError as exc:
+                    st.session_state.daily_brief_error = str(exc)
+                st.rerun()
+            with st.expander("修改计划"):
+                with st.form(f"update_daily_brief_schedule_{schedule_id}"):
+                    update_name = st.text_input(
+                        "计划名称",
+                        value=str(schedule.get("name") or "每日简报"),
+                    )
+                    update_time = st.time_input(
+                        "每天生成时间",
+                        value=datetime.strptime(
+                            str(schedule.get("run_time") or "08:00"),
+                            "%H:%M",
+                        ).time(),
+                        step=900,
+                    )
+                    update_enabled = st.toggle(
+                        "启用计划",
+                        value=bool(schedule.get("enabled")),
+                    )
+                    update_submitted = st.form_submit_button(
+                        "保存修改",
+                        use_container_width=True,
+                    )
+                if update_submitted:
+                    if not update_name.strip():
+                        st.session_state.daily_brief_error = "计划名称不能为空。"
+                    else:
+                        try:
+                            update_daily_brief_schedule_by_id_via_api(
+                                schedule_id,
+                                {
+                                    "name": update_name.strip(),
+                                    "enabled": update_enabled,
+                                    "run_time": update_time.strftime("%H:%M"),
+                                    "timezone": "Asia/Shanghai",
+                                },
+                            )
+                            st.session_state.daily_brief_notice = "简报计划已修改。"
+                        except WorkflowAPIError as exc:
+                            st.session_state.daily_brief_error = str(exc)
+                    st.rerun()
+
+    st.markdown("### 简报关注主题")
+    latest_brief_job = brief_jobs[0] if brief_jobs else {}
+    brief_is_running = latest_brief_job.get("status") in {"pending", "running"}
+    topic_by_name = {str(topic["name"]): topic for topic in topics}
+    enabled_topic_key = "_".join(
+        sorted(str(topic["topic_id"]) for topic in topics if topic.get("enabled"))
+    )
+    selected_topic_names = st.multiselect(
+        "选择今天希望关注的新闻方向",
+        options=list(topic_by_name),
+        default=[
+            name
+            for name, topic in topic_by_name.items()
+            if topic.get("enabled")
+        ],
+        placeholder="可同时选择多个主题",
+        key=f"brief_interest_topic_selection_{enabled_topic_key}",
+    )
+    saved_topic_names = {
+        name for name, topic in topic_by_name.items() if topic.get("enabled")
+    }
+    topic_selection_dirty = set(selected_topic_names) != saved_topic_names
+    if st.button(
+        "保存简报主题",
+        use_container_width=True,
+        key="brief_save_interest_topics",
+        disabled=not topic_selection_dirty,
+    ):
+        try:
+            update_interest_topic_selection_via_api(
+                [topic_by_name[name]["topic_id"] for name in selected_topic_names]
+            )
+            st.session_state.daily_brief_notice = "简报主题已保存。"
+        except WorkflowAPIError as exc:
+            st.session_state.daily_brief_error = str(exc)
+        st.rerun()
+
+    with st.expander("添加自定义简报主题"):
+        with st.form("create_brief_interest_topic_form", clear_on_submit=True):
+            custom_topic_name = st.text_input(
+                "主题名称",
+                placeholder="例如：多模态模型",
+            )
+            custom_topic_query = st.text_input(
+                "新闻检索重点",
+                placeholder="例如：今天多模态模型的重要发布、开源项目和应用进展",
+            )
+            custom_topic_submitted = st.form_submit_button(
+                "添加并关注",
+                use_container_width=True,
+            )
+        if custom_topic_submitted:
+            if not custom_topic_name.strip() or not custom_topic_query.strip():
+                st.session_state.daily_brief_error = "主题名称和检索重点不能为空。"
+            else:
+                try:
+                    created_topic = create_interest_topic_via_api(
+                        {
+                            "name": custom_topic_name.strip(),
+                            "query": custom_topic_query.strip(),
+                        }
+                    )
+                    enabled_ids = [
+                        str(topic["topic_id"])
+                        for topic in topics
+                        if topic.get("enabled")
+                    ]
+                    update_interest_topic_selection_via_api(
+                        [*enabled_ids, str(created_topic["topic_id"])]
+                    )
+                    st.session_state.daily_brief_notice = "自定义简报主题已添加。"
+                except WorkflowAPIError as exc:
+                    st.session_state.daily_brief_error = str(exc)
+            st.rerun()
+
+        for topic in [item for item in topics if not item.get("is_preset")]:
+            detail_col, delete_col = st.columns([0.82, 0.18], vertical_alignment="center")
+            detail_col.markdown(f"**{topic['name']}**  \n{topic['query']}")
+            if delete_col.button(
+                "删除",
+                key=f"delete_brief_interest_topic_{topic['topic_id']}",
+                use_container_width=True,
+            ):
+                try:
+                    delete_interest_topic_via_api(str(topic["topic_id"]))
+                    st.session_state.daily_brief_notice = "自定义简报主题已删除。"
+                except WorkflowAPIError as exc:
+                    st.session_state.daily_brief_error = str(exc)
+                st.rerun()
+
+    if topic_selection_dirty:
+        st.caption("主题选择已修改，请先保存再生成简报。")
+    if st.button(
+        "生成今日简报",
+        type="primary",
+        use_container_width=True,
+        key="generate_daily_brief",
+        disabled=topic_selection_dirty or brief_is_running,
+    ):
+        try:
+            job = run_daily_brief_now_via_api()
+            st.session_state.daily_brief_job_id = str(job["job_id"])
+            st.session_state.daily_brief_result = None
+            st.session_state.daily_brief_notice = (
+                "简报已提交后台生成，可以切换到其他页面继续使用。"
+            )
+        except WorkflowAPIError as exc:
+            st.session_state.daily_brief_error = str(exc)
+        st.rerun()
+
+    render_daily_brief_job_status()
+
+
+def render_daily_brief_job_status() -> None:
+    job_id = str(st.session_state.get("daily_brief_job_id") or "")
+    try:
+        if job_id:
+            job = get_background_job_via_api(job_id)
+        else:
+            jobs = list_background_jobs_via_api(kind="daily_brief", limit=1)
+            job = jobs[0] if jobs else None
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        return
+    if not job:
+        st.info("还没有生成过每日简报。")
+        return
+    status = str(job.get("status") or "")
+    if status in {"pending", "running"}:
+        render_running_daily_brief_job(str(job["job_id"]))
+        return
+    if status == "failed":
+        st.error(f"简报生成失败：{job.get('error') or '未知错误'}")
+        return
+    try:
+        for notification in list_notifications_via_api(
+            kind="daily_brief",
+            unread_only=True,
+            limit=100,
+        ):
+            metadata = notification.get("metadata") or {}
+            if str(metadata.get("job_id") or "") == str(job.get("job_id") or ""):
+                mark_notification_read_via_api(str(notification["notification_id"]))
+                break
+    except WorkflowAPIError:
+        pass
+    try:
+        result = WorkflowResult.model_validate(job.get("result") or {})
+    except Exception as exc:
+        st.error(f"简报结果格式错误：{exc}")
+        return
+    st.session_state.daily_brief_result = result
+    if result.final_result is not None:
+        st.markdown("### 今日简报")
+        st.caption(f"完成时间：{job.get('completed_at') or ''}")
+        with st.container(border=True):
+            st.markdown(normalize_markdown_content(result.final_result.answer))
+
+
+@st.fragment(run_every="2s")
+def render_running_daily_brief_job(job_id: str) -> None:
+    try:
+        job = get_background_job_via_api(job_id)
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        return
+    status = str(job.get("status") or "")
+    if status not in {"pending", "running"}:
+        st.rerun(scope="app")
+        return
+    st.info("Daily Brief Agent 正在后台汇总邮件、新闻、日程和长期偏好。")
+    events = (job.get("progress") or {}).get("events") or []
+    if events:
+        with st.expander("查看当前执行进度"):
+            for event in events[-8:]:
+                agent = str(event.get("agent") or "Agent")
+                event_type = str(event.get("event_type") or "running")
+                st.markdown(f"- `{agent}` · {event_type}")
+
+
+def render_daily_brief_data_panel() -> None:
+    current_settings = load_settings()
+    try:
+        topics = list_interest_topics_via_api()
+        schedules = list_daily_brief_schedules_via_api()
+        brief_jobs = list_background_jobs_via_api(kind="daily_brief", limit=1)
+        brief_notifications = list_notifications_via_api(
+            kind="daily_brief",
+            limit=30,
+        )
+        brief_unread_count = get_notification_unread_count_via_api(kind="daily_brief")
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        topics = []
+        schedules = []
+        brief_jobs = []
+        brief_notifications = []
+        brief_unread_count = 0
+    enabled_topics = [topic for topic in topics if topic.get("enabled")]
+    enabled_memories = [memory for memory in MEMORY_STORE.list_all() if memory.enabled]
+    st.markdown("### 简报数据源")
+    st.metric(
+        "QQ 邮箱",
+        "已连接" if current_settings.qq_email_address and current_settings.qq_email_auth_code else "未配置",
+    )
+    st.metric("新闻主题", len(enabled_topics))
+    st.metric(
+        "日历",
+        "已连接" if current_settings.calendar_provider != "disabled" else "未配置",
+    )
+    st.metric("长期记忆", len(enabled_memories))
+    st.divider()
+    enabled_schedules = [schedule for schedule in schedules if schedule.get("enabled")]
+    st.caption(
+        f"简报计划：共 {len(schedules)} 个，已启用 {len(enabled_schedules)} 个"
+    )
+    for schedule in enabled_schedules:
+        st.markdown(f"- {schedule.get('run_time')} · {schedule.get('name')}")
+    if brief_jobs:
+        latest_job = brief_jobs[0]
+        st.caption(
+            f"最近任务：{latest_job.get('status')} · "
+            f"{latest_job.get('created_at', '')}"
+        )
+    if enabled_topics:
+        st.markdown("**当前关注**")
+        for topic in enabled_topics:
+            st.markdown(f"- {topic['name']}")
+    st.divider()
+    inbox_title_col, inbox_action_col = st.columns(
+        [0.58, 0.42],
+        vertical_alignment="center",
+    )
+    inbox_title_col.markdown("### 简报收件箱")
+    if inbox_action_col.button(
+        "全部已读",
+        key="mark_all_daily_briefs_read",
+        use_container_width=True,
+        disabled=brief_unread_count == 0,
+    ):
+        try:
+            mark_all_notifications_read_via_api(kind="daily_brief")
+        except WorkflowAPIError as exc:
+            st.error(str(exc))
+        st.rerun()
+    st.caption(f"{brief_unread_count} 条未读简报")
+    if not brief_notifications:
+        st.info("暂无已生成的简报。")
+    for notification in brief_notifications:
+        notification_id = str(notification["notification_id"])
+        metadata = notification.get("metadata") or {}
+        job_id = str(metadata.get("job_id") or "")
+        unread_prefix = "未读 · " if not notification.get("read") else ""
+        with st.container(border=True):
+            st.markdown(
+                f"**{unread_prefix}{notification.get('title', '每日简报')}**"
+            )
+            st.caption(str(notification.get("created_at") or ""))
+            if st.button(
+                "查看简报",
+                key=f"open_daily_brief_{notification_id}",
+                use_container_width=True,
+                disabled=not job_id,
+            ):
+                try:
+                    if not notification.get("read"):
+                        mark_notification_read_via_api(notification_id)
+                    st.session_state.daily_brief_job_id = job_id
+                except WorkflowAPIError as exc:
+                    st.error(str(exc))
+                st.rerun()
+
+
+def _monitor_run_finished(last_run_at: str | None, started_at: str) -> bool:
+    if not last_run_at:
+        return False
+    try:
+        return datetime.fromisoformat(last_run_at) >= datetime.fromisoformat(started_at)
+    except ValueError:
+        return last_run_at >= started_at
+
+
+def render_monitor_latest_result(result: dict, *, expanded: bool = False) -> None:
+    items = result.get("items") or []
+    observed_at = result.get("observed_at") or result.get("last_run_at") or "尚未运行"
+    label = f"最近一次运行结果 · {len(items)} 条 · {observed_at}"
+    with st.expander(label, expanded=expanded):
+        if not items:
+            st.caption("本次尚未生成可展示的监控快照，请查看通知中心中的失败或无结果说明。")
+            return
+        for index, item in enumerate(items[:20], start=1):
+            if not isinstance(item, dict):
+                st.markdown(f"{index}. {item}")
+                continue
+            title = str(
+                item.get("title")
+                or item.get("full_name")
+                or item.get("name")
+                or item.get("url")
+                or f"结果 {index}"
+            )
+            url = str(item.get("url") or item.get("html_url") or "")
+            st.markdown(f"**{index}. [{title}]({url})**" if url else f"**{index}. {title}**")
+            summary = str(
+                item.get("snippet")
+                or item.get("description")
+                or item.get("summary")
+                or ""
+            ).strip()
+            if summary:
+                st.markdown(summary[:500])
+            metadata = []
+            if item.get("stars") is not None:
+                metadata.append(f"Stars {item.get('stars')}")
+            if item.get("language"):
+                metadata.append(str(item.get("language")))
+            if item.get("latest_release"):
+                metadata.append(f"Release {item.get('latest_release')}")
+            if item.get("published_at"):
+                metadata.append(str(item.get("published_at")))
+            if metadata:
+                st.caption(" · ".join(metadata))
+            if index < min(len(items), 20):
+                st.divider()
+        if len(items) > 20:
+            st.caption(f"共 {len(items)} 条，当前展示前 20 条。")
+
+
+@st.fragment(run_every="2s")
+def render_monitor_active_run(rule_id: str, started_at: str) -> None:
+    try:
+        result = get_monitor_latest_result_via_api(rule_id)
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        return
+    if not _monitor_run_finished(result.get("last_run_at"), started_at):
+        st.info("Monitor Agent 正在检索、比较并保存监控快照，你可以切换到其他页面。")
+        return
+    active_runs = dict(st.session_state.get("monitor_active_runs") or {})
+    active_runs.pop(rule_id, None)
+    st.session_state.monitor_active_runs = active_runs
+    expanded_rule_ids = set(
+        st.session_state.get("monitor_expanded_result_rule_ids") or set()
+    )
+    expanded_rule_ids.add(rule_id)
+    st.session_state.monitor_expanded_result_rule_ids = expanded_rule_ids
+    st.session_state.monitor_notice = (
+        f"监控运行完成，获得 {result.get('item_count', 0)} 条结果。"
+    )
+    st.rerun(scope="app")
+
+
+def _start_monitor_runs(rules: list[dict]) -> tuple[int, list[str]]:
+    active_runs = dict(st.session_state.get("monitor_active_runs") or {})
+    started_count = 0
+    errors: list[str] = []
+    for rule in rules:
+        rule_id = str(rule.get("rule_id") or "")
+        if not rule_id or rule_id in active_runs:
+            continue
+        started_at = datetime.now(UTC).isoformat()
+        try:
+            run_monitor_rule_via_api(rule_id)
+        except WorkflowAPIError as exc:
+            errors.append(f"{rule.get('name', rule_id)}：{exc}")
+            continue
+        active_runs[rule_id] = {
+            "started_at": started_at,
+            "rule_name": str(rule.get("name") or "未命名规则"),
+        }
+        started_count += 1
+    st.session_state.monitor_active_runs = active_runs
+    return started_count, errors
+
+
+def render_monitor_management_page() -> None:
+    st.markdown(
+        """
+        <div class="chat-header">
+          <div class="chat-title">信息监控 <span class="status-dot"></span></div>
+          <div class="muted">Monitor Agent · Web Research · Scheduler</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("持续跟踪指定公司、招聘、新闻、GitHub 项目和技术博客；首次运行只建立基线。")
+
+    if st.session_state.monitor_notice:
+        st.success(st.session_state.monitor_notice)
+        st.session_state.monitor_notice = ""
+    if st.session_state.monitor_error:
+        st.error(st.session_state.monitor_error)
+        st.session_state.monitor_error = ""
+
+    try:
+        status = get_automation_status_via_api()
+        rules = list_monitor_rules_via_api()
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        return
+
+    metric_a, metric_b, metric_c, metric_d = st.columns(4)
+    metric_a.metric("监控规则", len(rules))
+    metric_b.metric("已启用", len([rule for rule in rules if rule.get("enabled")]))
+    metric_c.metric("后台调度", "运行中" if status.get("running") else "未启动")
+    metric_d.metric("GitHub API", "已认证" if status.get("github_token_configured") else "匿名")
+
+    enabled_rules = [rule for rule in rules if rule.get("enabled")]
+    active_runs = st.session_state.get("monitor_active_runs") or {}
+    hot_ai_preset_exists = any(
+        rule.get("target_type") == "github"
+        and rule.get("target") == "热门 AI 项目"
+        for rule in rules
+    )
+    run_col, preset_col = st.columns([0.62, 0.38])
+    with run_col:
+        run_label = "立即运行一次" if len(enabled_rules) <= 1 else "立即运行全部监控"
+        if st.button(
+            run_label,
+            type="primary",
+            use_container_width=True,
+            disabled=not enabled_rules or all(
+                str(rule.get("rule_id")) in active_runs for rule in enabled_rules
+            ),
+            key="monitor_run_all_now",
+        ):
+            started_count, errors = _start_monitor_runs(enabled_rules)
+            if started_count:
+                st.session_state.monitor_notice = f"已启动 {started_count} 条监控任务，页面会自动显示结果。"
+            if errors:
+                st.session_state.monitor_error = "；".join(errors)
+            st.rerun()
+    with preset_col:
+        if st.button(
+            "添加热门 AI 项目监控",
+            use_container_width=True,
+            disabled=hot_ai_preset_exists,
+            key="monitor_add_hot_ai_preset",
+        ):
+            try:
+                create_monitor_rule_via_api(
+                    {
+                        "name": "热门 AI 项目",
+                        "target_type": "github",
+                        "target": "热门 AI 项目",
+                        "query": "LLM Agent RAG MCP 热门项目",
+                        "interval_minutes": 360,
+                        "enabled": True,
+                    }
+                )
+                st.session_state.monitor_notice = "热门 AI 项目监控已创建，首次检查将建立基线。"
+            except WorkflowAPIError as exc:
+                st.session_state.monitor_error = str(exc)
+            st.rerun()
+    if not status.get("configured_enabled"):
+        st.info("自动调度默认关闭。可在 .env 中设置 AUTOMATION_SCHEDULER_ENABLED=true 后重启 API；仍可手动立即检查。")
+
+    with st.expander("新建监控规则", expanded=not rules):
+        with st.form("create_monitor_rule_form", clear_on_submit=True):
+            name = st.text_input("规则名称", placeholder="例如：Vercel 招聘变化")
+            target_label = st.selectbox("监控类型", list(MONITOR_TARGET_LABELS))
+            target = st.text_input("监控目标", placeholder="公司名、仓库名或博客名称")
+            query = st.text_input("检索要求", placeholder="例如：Vercel 中国区 AI 工程师招聘 最新")
+            interval_minutes = st.number_input(
+                "检查间隔（分钟）",
+                min_value=15,
+                max_value=10080,
+                value=360,
+                step=15,
+            )
+            submitted = st.form_submit_button("创建规则", use_container_width=True)
+        if submitted:
+            if not all(value.strip() for value in (name, target, query)):
+                st.session_state.monitor_error = "规则名称、监控目标和检索要求不能为空。"
+            else:
+                try:
+                    create_monitor_rule_via_api(
+                        {
+                            "name": name.strip(),
+                            "target_type": MONITOR_TARGET_LABELS[target_label],
+                            "target": target.strip(),
+                            "query": query.strip(),
+                            "interval_minutes": int(interval_minutes),
+                            "enabled": True,
+                        }
+                    )
+                    st.session_state.monitor_notice = "监控规则已创建，首次检查将建立对比基线。"
+                except WorkflowAPIError as exc:
+                    st.session_state.monitor_error = str(exc)
+            st.rerun()
+
+    st.markdown("### 监控规则")
+    if not rules:
+        st.info("还没有监控规则。")
+        return
+    for rule in rules:
+        rule_id = str(rule["rule_id"])
+        active_run = (st.session_state.get("monitor_active_runs") or {}).get(rule_id)
+        with st.container(border=True):
+            detail_col, action_col = st.columns([0.72, 0.28], vertical_alignment="center")
+            with detail_col:
+                state_label = "已启用" if rule.get("enabled") else "已停用"
+                st.markdown(f"**{rule.get('name', '未命名规则')}** · {state_label}")
+                st.markdown(rule.get("query", ""))
+                last_run = rule.get("last_run_at") or "尚未运行"
+                st.caption(
+                    f"{rule.get('target_type')} · {rule.get('target')} · "
+                    f"每 {rule.get('interval_minutes')} 分钟 · 上次运行 {last_run}"
+                )
+            with action_col:
+                if st.button(
+                    "运行中..." if active_run else "立即运行一次",
+                    key=f"monitor_run_{rule_id}",
+                    use_container_width=True,
+                    disabled=bool(active_run),
+                ):
+                    started_count, errors = _start_monitor_runs([rule])
+                    if started_count:
+                        st.session_state.monitor_notice = "监控任务已启动，页面会自动显示本次结果。"
+                    if errors:
+                        st.session_state.monitor_error = "；".join(errors)
+                    st.rerun()
+                toggle_label = "停用" if rule.get("enabled") else "启用"
+                if st.button(
+                    toggle_label,
+                    key=f"monitor_toggle_{rule_id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        update_monitor_rule_via_api(
+                            rule_id,
+                            {"enabled": not bool(rule.get("enabled"))},
+                        )
+                    except WorkflowAPIError as exc:
+                        st.session_state.monitor_error = str(exc)
+                    st.rerun()
+                with st.popover("管理", use_container_width=True):
+                    st.caption("删除后会同时删除该规则的历史快照。")
+                    if st.button(
+                        "删除规则",
+                        key=f"monitor_delete_{rule_id}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            delete_monitor_rule_via_api(rule_id)
+                            st.session_state.monitor_notice = "监控规则已删除。"
+                        except WorkflowAPIError as exc:
+                            st.session_state.monitor_error = str(exc)
+                        st.rerun()
+            if active_run:
+                render_monitor_active_run(rule_id, str(active_run.get("started_at") or ""))
+            else:
+                try:
+                    latest_result = get_monitor_latest_result_via_api(rule_id)
+                except WorkflowAPIError as exc:
+                    st.error(str(exc))
+                else:
+                    render_monitor_latest_result(
+                        latest_result,
+                        expanded=rule_id
+                        in set(
+                            st.session_state.get("monitor_expanded_result_rule_ids")
+                            or set()
+                        ),
+                    )
+
+
+def render_monitor_notification_panel() -> None:
+    st.markdown("### 通知中心")
+    unread_only = st.toggle("只看未读", value=False, key="monitor_unread_only")
+    try:
+        notifications = list_notifications_via_api(
+            unread_only=unread_only,
+            limit=50,
+            kind="monitor",
+        )
+        unread_count = get_notification_unread_count_via_api(kind="monitor")
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        return
+    title_col, action_col = st.columns([0.55, 0.45], vertical_alignment="center")
+    title_col.caption(f"{unread_count} 条未读通知")
+    with action_col:
+        if st.button(
+            "全部已读",
+            use_container_width=True,
+            disabled=unread_count == 0,
+            key="monitor_mark_all_read",
+        ):
+            try:
+                mark_all_notifications_read_via_api(kind="monitor")
+            except WorkflowAPIError as exc:
+                st.error(str(exc))
+            st.rerun()
+    if not notifications:
+        st.info("暂无通知。建立基线不会产生提醒，发现新增或显著变化时才会通知。")
+    for notification in notifications:
+        notification_id = str(notification["notification_id"])
+        unread_prefix = "未读 · " if not notification.get("read") else ""
+        with st.container(border=True):
+            st.markdown(f"**{unread_prefix}{notification.get('title', '通知')}**")
+            if notification.get("content"):
+                st.markdown(notification["content"])
+            st.caption(
+                f"{notification.get('source_agent') or 'system'} · "
+                f"{notification.get('created_at', '')}"
+            )
+            read_label = "标为未读" if notification.get("read") else "阅读完成"
+            if st.button(
+                read_label,
+                key=f"notification_read_{notification_id}",
+                use_container_width=True,
+            ):
+                try:
+                    mark_notification_read_via_api(
+                        notification_id,
+                        read=not bool(notification.get("read")),
+                    )
+                except WorkflowAPIError as exc:
+                    st.error(str(exc))
+                st.rerun()
 
 
 def render_memory_system_page() -> None:
@@ -2103,6 +2961,18 @@ def run_current_task() -> None:
     st.session_state.last_task = task[:32]
     task_id = ensure_editable_draft(task)
     conversation_context = build_conversation_context(get_current_messages())
+    try:
+        job = submit_multi_agent_job_via_api(
+            task,
+            conversation_context,
+            kind="chat",
+            label=task[:100],
+            metadata={"history_task_id": task_id},
+        )
+    except WorkflowAPIError as exc:
+        st.session_state.task_error = str(exc)
+        st.session_state.running_task = ""
+        return
     st.session_state.pending_task_input = ""
     st.session_state.task_input = ""
     st.session_state.task_input_key += 1
@@ -2111,7 +2981,96 @@ def run_current_task() -> None:
         "task": task,
         "task_id": task_id,
         "conversation_context": conversation_context,
+        "job_id": str(job["job_id"]),
     }
+
+
+@st.fragment(run_every="1s")
+def render_chat_background_job(stream_request: dict) -> None:
+    st.markdown(
+        render_user_message(stream_request["task"]),
+        unsafe_allow_html=True,
+    )
+    avatar_col, content_col = st.columns([0.055, 0.945], gap="small")
+    with avatar_col:
+        st.markdown('<div class="avatar assistant">A</div>', unsafe_allow_html=True)
+    with content_col:
+        try:
+            job = get_background_job_via_api(str(stream_request["job_id"]))
+        except WorkflowAPIError as exc:
+            st.error(str(exc))
+            return
+        progress_events = (job.get("progress") or {}).get("events") or []
+        live_events = [
+            {
+                "agent": event.get("agent", ""),
+                "label": AGENT_LABELS.get(
+                    event.get("agent", ""),
+                    str(event.get("agent", "Agent")).title(),
+                ),
+                "event_type": event.get("event_type", ""),
+                "output": event.get("output", {}),
+                "timestamp": event.get("timestamp", ""),
+            }
+            for event in progress_events
+            if isinstance(event, dict)
+        ]
+        live_view = build_live_view(live_events)
+        with st.expander("思考过程 / Agent 执行过程", expanded=True):
+            policy_card = build_policy_card_markdown(live_view)
+            if policy_card:
+                with st.container(border=True):
+                    st.markdown(policy_card)
+            st.code(
+                build_thought_text(live_view)
+                if live_events
+                else "后台任务已提交，等待 Agent 开始执行...",
+                language="text",
+            )
+        status = str(job.get("status") or "")
+        if status in {"pending", "running"}:
+            with st.container(border=True):
+                st.markdown("Agent 正在后台执行。你可以切换到其他功能页面。")
+            return
+        if status == "failed":
+            error_message = str(job.get("error") or "未知错误")
+            HISTORY_STORE.save_error(
+                task_id=stream_request["task_id"],
+                user_input=stream_request["task"],
+                error_message=error_message,
+            )
+            st.session_state.task_error = error_message
+            st.session_state.stream_request = None
+            st.session_state.running_task = ""
+            st.rerun(scope="app")
+            return
+        try:
+            workflow_result = WorkflowResult.model_validate(job.get("result") or {})
+            final_view = build_task_view(workflow_result)
+            HISTORY_STORE.save_result(
+                workflow_result,
+                final_view,
+                task_id=stream_request["task_id"],
+            )
+            if st.session_state.current_task_id == stream_request["task_id"]:
+                st.session_state.task_view = final_view
+            st.session_state.task_error = ""
+            st.session_state.stream_request = None
+            st.session_state.running_task = ""
+            st.rerun(scope="app")
+            return
+        except Exception as exc:
+            error_message = str(exc)
+            HISTORY_STORE.save_error(
+                task_id=stream_request["task_id"],
+                user_input=stream_request["task"],
+                error_message=error_message,
+            )
+            st.session_state.task_error = error_message
+            st.session_state.stream_request = None
+            st.session_state.running_task = ""
+            st.rerun(scope="app")
+            return
 
 
 is_running = st.session_state.stream_request is not None
@@ -2141,21 +3100,33 @@ else:
 with left:
     with st.container(border=True):
         with st.container(key="nav_panel"):
-            if st.button("对话  Chat", key="nav_chat", use_container_width=True, disabled=is_running):
+            if st.button("对话  Chat", key="nav_chat", use_container_width=True):
                 st.session_state.active_page = "chat"
                 st.rerun()
-            if st.button("技能管理  Agent Skills", key="nav_skills", use_container_width=True, disabled=is_running):
+            if st.button("技能管理  Agent Skills", key="nav_skills", use_container_width=True):
                 st.session_state.active_page = "skills"
                 st.rerun()
-            if st.button("记忆系统  Memory System", key="nav_memory", use_container_width=True, disabled=is_running):
+            if st.button("记忆系统  Memory System", key="nav_memory", use_container_width=True):
                 st.session_state.active_page = "memory"
                 st.rerun()
-            render_email_nav_button(is_running)
-            if st.button("LLM Wiki 知识库", key="nav_wiki", use_container_width=True, disabled=is_running):
+            render_email_nav_button()
+            render_notification_nav_button(
+                kind="daily_brief",
+                label="每日简报  Daily Brief",
+                page="brief",
+                button_key="nav_daily_brief",
+            )
+            render_notification_nav_button(
+                kind="monitor",
+                label="信息监控  Monitor",
+                page="monitor",
+                button_key="nav_monitor",
+            )
+            if st.button("LLM Wiki 知识库", key="nav_wiki", use_container_width=True):
                 st.session_state.active_page = "wiki"
                 st.rerun()
         st.markdown('<div class="section-label">NEW CHAT</div>', unsafe_allow_html=True)
-        if st.button("新建空对话", use_container_width=True):
+        if st.button("新建空对话", use_container_width=True, disabled=is_running):
             create_new_chat()
             st.rerun()
         selected_example = st.selectbox("示例任务", EXAMPLES, label_visibility="collapsed")
@@ -2298,6 +3269,24 @@ if st.session_state.active_page == "email":
             render_email_trace_panel()
     st.stop()
 
+if st.session_state.active_page == "brief":
+    with center:
+        with st.container(border=True):
+            render_daily_brief_page()
+    with right:
+        with st.container(border=True):
+            render_daily_brief_data_panel()
+    st.stop()
+
+if st.session_state.active_page == "monitor":
+    with center:
+        with st.container(border=True):
+            render_monitor_management_page()
+    with right:
+        with st.container(border=True):
+            render_monitor_notification_panel()
+    st.stop()
+
 if st.session_state.active_page == "wiki":
     with center:
         with st.container(border=True):
@@ -2347,73 +3336,7 @@ with center:
                     st.markdown("</div></div>", unsafe_allow_html=True)
 
         if is_running and st.session_state.stream_request is not None:
-            stream_request = st.session_state.stream_request
-            st.markdown(
-                render_user_message(stream_request["task"]),
-                unsafe_allow_html=True,
-            )
-            avatar_col, content_col = st.columns([0.055, 0.945], gap="small")
-            with avatar_col:
-                st.markdown('<div class="avatar assistant">A</div>', unsafe_allow_html=True)
-            with content_col:
-                thought_slot = st.empty()
-                answer_slot = st.empty()
-                live_events: list[dict] = []
-                live_view = build_live_view(live_events)
-                with thought_slot.container():
-                    with st.expander("思考过程 / Agent 执行过程", expanded=True):
-                        policy_card = build_policy_card_markdown(live_view)
-                        if policy_card:
-                            with st.container(border=True):
-                                st.markdown(policy_card)
-                        st.code("正在连接流式工作流...", language="text")
-                with answer_slot.container(border=True):
-                    st.markdown("正在执行任务...")
-
-                try:
-                    for stream_event in stream_workflow_via_api(
-                        stream_request["task"],
-                        conversation_context=stream_request["conversation_context"],
-                    ):
-                        event_type = stream_event.get("type")
-                        if event_type == "agent_event":
-                            live_events.append(sse_agent_event_to_view_event(stream_event))
-                            live_view = build_live_view(live_events)
-                            with thought_slot.container():
-                                with st.expander("思考过程 / Agent 执行过程", expanded=True):
-                                    policy_card = build_policy_card_markdown(live_view)
-                                    if policy_card:
-                                        with st.container(border=True):
-                                            st.markdown(policy_card)
-                                    st.code(build_thought_text(live_view), language="text")
-                        elif event_type == "workflow_completed":
-                            workflow_result = WorkflowResult.model_validate(
-                                stream_event["result"]
-                            )
-                            final_view = build_task_view(workflow_result)
-                            HISTORY_STORE.save_result(
-                                workflow_result,
-                                final_view,
-                                task_id=stream_request["task_id"],
-                            )
-                            st.session_state.task_view = final_view
-                            st.session_state.task_error = ""
-                            st.session_state.stream_request = None
-                            with answer_slot.container(border=True):
-                                render_answer_or_confirmation(final_view)
-                            st.rerun()
-                        elif event_type == "workflow_error":
-                            raise RuntimeError(stream_event.get("error", "未知错误"))
-                except Exception as exc:
-                    error_view = HISTORY_STORE.save_error(
-                        task_id=stream_request["task_id"],
-                        user_input=stream_request["task"],
-                        error_message=str(exc),
-                    ).view
-                    st.session_state.task_view = error_view
-                    st.session_state.task_error = str(exc)
-                    st.session_state.stream_request = None
-                    st.rerun()
+            render_chat_background_job(st.session_state.stream_request)
 
         if not is_running and not messages and get_current_input().strip():
             st.markdown(
@@ -2490,7 +3413,3 @@ with right:
             st.markdown('<span class="raw-label">SOURCES</span>', unsafe_allow_html=True)
             for index, source in enumerate(view["sources"], start=1):
                 st.markdown(f"[S{index}] [{source['title']}]({source['url']})")
-
-if is_running:
-    time.sleep(1)
-    st.rerun()

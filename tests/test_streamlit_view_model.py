@@ -72,3 +72,28 @@ def test_build_task_view_exposes_pending_confirmation_without_final_result():
         "completed",
         "await_confirmation",
     ]
+
+
+def test_build_task_view_labels_multi_agent_events():
+    result = WorkflowResult(
+        user_input="研究主题",
+        events=[
+            AgentEvent(
+                task_id="task-1",
+                agent="web_research",
+                event_type="task_completed",
+            ),
+            AgentEvent(
+                task_id="task-1",
+                agent="memory",
+                event_type="task_completed",
+            ),
+        ],
+    )
+
+    view = build_task_view(result)
+
+    assert [event["label"] for event in view["events"]] == [
+        "Web Research Agent",
+        "Memory Agent",
+    ]

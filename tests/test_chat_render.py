@@ -69,6 +69,38 @@ def test_build_thought_text_formats_policy_event_without_json_blob():
     assert '{"intent"' not in text
 
 
+def test_build_supervisor_card_for_multi_agent_decision():
+    view = {
+        "events": [
+            {
+                "agent": "supervisor",
+                "label": "Supervisor",
+                "event_type": "decision_completed",
+                "output": {
+                    "intent": "parallel_research",
+                    "mode": "delegate",
+                    "tasks": [
+                        {"assigned_to": "web_research"},
+                        {"assigned_to": "memory"},
+                    ],
+                    "direct_tool": "none",
+                    "requires_confirmation": False,
+                    "confidence": 0.95,
+                    "reason": "需要联网证据与用户偏好。",
+                },
+            }
+        ]
+    }
+
+    markdown = build_policy_card_markdown(view)
+    thought = build_thought_text(view)
+
+    assert "Supervisor 决策" in markdown
+    assert "web_research、memory" in markdown
+    assert "mode: delegate" in thought
+    assert "assigned_agents: ['web_research', 'memory']" in thought
+
+
 def test_render_assistant_message_places_thought_before_answer_inside_box():
     html = render_assistant_message(
         "# 标题\n\n- 项目",

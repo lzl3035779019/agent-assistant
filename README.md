@@ -11,6 +11,43 @@ PMAA 是一个基于 Supervisor 层级架构的个人多智能体助手。系统
 - **Information Monitor Agent**：定时跟踪公司、招聘、GitHub 项目和技术博客，基于快照识别重要变化。
 - **GBrain Wiki**：通过 MCP 接入 WSL 中的本地知识库，提供文档入库、语义检索、页面读取和关系可视化。
 
+## 界面预览
+
+点击图片可查看原始大图，完整说明见 [产品效果展示](docs/PRODUCT_SHOWCASE_ZH.md)。
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/images/demo/chat-workspace.png"><img src="docs/images/demo/chat-workspace.png" alt="对话与多 Agent 执行" width="100%"></a><br>
+      <strong>对话与多 Agent 执行</strong>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/images/demo/daily-brief.png"><img src="docs/images/demo/daily-brief.png" alt="每日简报" width="100%"></a><br>
+      <strong>每日简报</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/images/demo/information-monitor.png"><img src="docs/images/demo/information-monitor.png" alt="信息监控" width="100%"></a><br>
+      <strong>信息监控</strong>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/images/demo/gbrain-wiki.png"><img src="docs/images/demo/gbrain-wiki.png" alt="LLM Wiki 知识库" width="100%"></a><br>
+      <strong>LLM Wiki 知识库</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/images/demo/memory-management.png"><img src="docs/images/demo/memory-management.png" alt="长期记忆管理" width="100%"></a><br>
+      <strong>长期记忆管理</strong>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/images/demo/email-assistant.png"><img src="docs/images/demo/email-assistant.png" alt="邮件助手" width="100%"></a><br>
+      <strong>邮件助手</strong>
+    </td>
+  </tr>
+</table>
+
 ## 多 Agent 架构
 
 ```text

@@ -289,6 +289,11 @@ st.markdown(
         line-height: 1.65;
         font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
     }
+    div[class*="st-key-chat_job_progress"] .stale,
+    div[class*="st-key-chat_job_progress"] [data-stale="true"] {
+        opacity: 1 !important;
+        transition: none !important;
+    }
     .policy-card {
         border: 1px solid #e7d8b8;
         border-radius: 8px;
@@ -2985,38 +2990,31 @@ def run_current_task() -> None:
     }
 
 
-@st.fragment(run_every="1s")
+@st.fragment(run_every="2s")
 def render_chat_background_job(stream_request: dict) -> None:
-    st.markdown(
-        render_user_message(stream_request["task"]),
-        unsafe_allow_html=True,
-    )
-    avatar_col, content_col = st.columns([0.055, 0.945], gap="small")
-    with avatar_col:
-        st.markdown('<div class="avatar assistant">A</div>', unsafe_allow_html=True)
-    with content_col:
-        try:
-            job = get_background_job_via_api(str(stream_request["job_id"]))
-        except WorkflowAPIError as exc:
-            st.error(str(exc))
-            return
-        progress_events = (job.get("progress") or {}).get("events") or []
-        live_events = [
-            {
-                "agent": event.get("agent", ""),
-                "label": AGENT_LABELS.get(
-                    event.get("agent", ""),
-                    str(event.get("agent", "Agent")).title(),
-                ),
-                "event_type": event.get("event_type", ""),
-                "output": event.get("output", {}),
-                "timestamp": event.get("timestamp", ""),
-            }
-            for event in progress_events
-            if isinstance(event, dict)
-        ]
-        live_view = build_live_view(live_events)
-        with st.expander("思考过程 / Agent 执行过程", expanded=True):
+    try:
+        job = get_background_job_via_api(str(stream_request["job_id"]))
+    except WorkflowAPIError as exc:
+        st.error(str(exc))
+        return
+    progress_events = (job.get("progress") or {}).get("events") or []
+    live_events = [
+        {
+            "agent": event.get("agent", ""),
+            "label": AGENT_LABELS.get(
+                event.get("agent", ""),
+                str(event.get("agent", "Agent")).title(),
+            ),
+            "event_type": event.get("event_type", ""),
+            "output": event.get("output", {}),
+            "timestamp": event.get("timestamp", ""),
+        }
+        for event in progress_events
+        if isinstance(event, dict)
+    ]
+    live_view = build_live_view(live_events)
+    with st.expander("思考过程 / Agent 执行过程", expanded=True):
+        with st.container(height=360, border=False):
             policy_card = build_policy_card_markdown(live_view)
             if policy_card:
                 with st.container(border=True):
@@ -3027,50 +3025,50 @@ def render_chat_background_job(stream_request: dict) -> None:
                 else "后台任务已提交，等待 Agent 开始执行...",
                 language="text",
             )
-        status = str(job.get("status") or "")
-        if status in {"pending", "running"}:
-            with st.container(border=True):
-                st.markdown("Agent 正在后台执行。你可以切换到其他功能页面。")
-            return
-        if status == "failed":
-            error_message = str(job.get("error") or "未知错误")
-            HISTORY_STORE.save_error(
-                task_id=stream_request["task_id"],
-                user_input=stream_request["task"],
-                error_message=error_message,
-            )
-            st.session_state.task_error = error_message
-            st.session_state.stream_request = None
-            st.session_state.running_task = ""
-            st.rerun(scope="app")
-            return
-        try:
-            workflow_result = WorkflowResult.model_validate(job.get("result") or {})
-            final_view = build_task_view(workflow_result)
-            HISTORY_STORE.save_result(
-                workflow_result,
-                final_view,
-                task_id=stream_request["task_id"],
-            )
-            if st.session_state.current_task_id == stream_request["task_id"]:
-                st.session_state.task_view = final_view
-            st.session_state.task_error = ""
-            st.session_state.stream_request = None
-            st.session_state.running_task = ""
-            st.rerun(scope="app")
-            return
-        except Exception as exc:
-            error_message = str(exc)
-            HISTORY_STORE.save_error(
-                task_id=stream_request["task_id"],
-                user_input=stream_request["task"],
-                error_message=error_message,
-            )
-            st.session_state.task_error = error_message
-            st.session_state.stream_request = None
-            st.session_state.running_task = ""
-            st.rerun(scope="app")
-            return
+    status = str(job.get("status") or "")
+    if status in {"pending", "running"}:
+        with st.container(border=True):
+            st.markdown("Agent 正在后台执行。你可以切换到其他功能页面。")
+        return
+    if status == "failed":
+        error_message = str(job.get("error") or "未知错误")
+        HISTORY_STORE.save_error(
+            task_id=stream_request["task_id"],
+            user_input=stream_request["task"],
+            error_message=error_message,
+        )
+        st.session_state.task_error = error_message
+        st.session_state.stream_request = None
+        st.session_state.running_task = ""
+        st.rerun(scope="app")
+        return
+    try:
+        workflow_result = WorkflowResult.model_validate(job.get("result") or {})
+        final_view = build_task_view(workflow_result)
+        HISTORY_STORE.save_result(
+            workflow_result,
+            final_view,
+            task_id=stream_request["task_id"],
+        )
+        if st.session_state.current_task_id == stream_request["task_id"]:
+            st.session_state.task_view = final_view
+        st.session_state.task_error = ""
+        st.session_state.stream_request = None
+        st.session_state.running_task = ""
+        st.rerun(scope="app")
+        return
+    except Exception as exc:
+        error_message = str(exc)
+        HISTORY_STORE.save_error(
+            task_id=stream_request["task_id"],
+            user_input=stream_request["task"],
+            error_message=error_message,
+        )
+        st.session_state.task_error = error_message
+        st.session_state.stream_request = None
+        st.session_state.running_task = ""
+        st.rerun(scope="app")
+        return
 
 
 is_running = st.session_state.stream_request is not None
@@ -3336,7 +3334,20 @@ with center:
                     st.markdown("</div></div>", unsafe_allow_html=True)
 
         if is_running and st.session_state.stream_request is not None:
-            render_chat_background_job(st.session_state.stream_request)
+            current_stream_request = st.session_state.stream_request
+            st.markdown(
+                render_user_message(current_stream_request["task"]),
+                unsafe_allow_html=True,
+            )
+            avatar_col, content_col = st.columns([0.055, 0.945], gap="small")
+            with avatar_col:
+                st.markdown(
+                    '<div class="avatar assistant">A</div>',
+                    unsafe_allow_html=True,
+                )
+            with content_col:
+                with st.container(key="chat_job_progress"):
+                    render_chat_background_job(current_stream_request)
 
         if not is_running and not messages and get_current_input().strip():
             st.markdown(

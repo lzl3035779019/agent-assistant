@@ -34,6 +34,8 @@ Tool Registry / MCP / Action Confirmation
 
 系统采用中心化通信：子 Agent 不直接相互调用，而是通过结构化 `AgentMessage` 向 Supervisor 申请能力。Supervisor 根据 `AgentTask.depends_on` 形成任务依赖图，对同一依赖层的就绪任务并发派发，并统一聚合 `AgentResult` 和执行事件。
 
+详细的总体架构、Supervisor 调度流程和 5 个子 Agent 内部工作流见：[PMAA 多 Agent 架构图](docs/AGENT_ARCHITECTURE_ZH.md)。
+
 ### 通信协议
 
 - `AgentTask`：目标、上下文、依赖关系、工具权限和输出约束。
